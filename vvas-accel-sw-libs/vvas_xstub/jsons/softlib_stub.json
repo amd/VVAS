@@ -1,0 +1,18 @@
+{
+  "xclbin-location":"/run/media/mmcblk0p1/x_plus_ml.xclbin",
+  "vvas-library-repo": "/usr/lib",
+  "element-mode":"inplace",
+  "kernel" :
+    {
+       "library-name":"libvvas_xstub.so",
+        "config": {
+          "kernel-lib-type" : "soft-lib",
+          "element-mode" : "inplace",
+          "src-stride-align" : 1,
+          "src-height-align" : 1,
+          "sink-stride-align" : 1,
+          "sink-height-align" : 1,
+          "debug-level" : 4
+      }
+    }
+}

@@ -1,0 +1,34 @@
+{
+  "preprocess-config": {
+    "xclbin-location": "/run/media/mmcblk0p1/x_plus_ml.xclbin",
+    "library-name": "libvvas_image_process_hw_lib.so",
+    "library-config": "{\"kernel-name\":\"image_processing:{image_processing_1}\"}",
+    "mean-r": 123.675,
+    "mean-g": 116.28,
+    "mean-b": 103.53,
+    "scale-r": 0.017124,
+    "scale-g": 0.017507,
+    "scale-b": 0.017429
+  },
+  "infer-config": {
+    "model-format": "RGB",
+    "inference-backend-runtime": "vart",
+    "vart-config": {
+      "vart-model-path": "/dev/shm/models/resnet50/ResNet50/ResNet50.rai"
+    }
+  },
+  "postprocess-config": {
+    "library-path": "/usr/lib/libvvascore_postprocess_vart.so",
+    "library-config": {
+      "topk": 1,
+      "label-file-path": "/etc/vvas/configs/infer/imagenet-classes-1000.txt",
+      "type": "SOFTMAX",
+      "post-process-print": "false",
+      "model-params": {
+        "quant-scale-factors": [
+          4.0
+        ]
+      }
+    }
+  }
+}

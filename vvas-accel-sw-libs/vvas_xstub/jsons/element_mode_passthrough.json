@@ -1,0 +1,19 @@
+{
+  "xclbin-location": "/run/media/mmcblk0p1/dpu.xclbin",
+  "vvas-library-repo": "/usr/lib",
+  "element-mode": "transform",
+  "kernel":
+  {
+     "kernel-name" : "vvas_xsample:{vvas_xsample_1}",
+     "library-name": "libvvas_xsample.so",
+     "config": {
+     "debug_level" : 4 ,
+      "input_string" : "HELLO",
+     "overlay_image_xpos" : 0,
+     "overlay_image_ypos" : 0,
+     "overlay_image_height" : 720,
+     "overlay_image_width" : 1280,
+     "overlay_image_path" : "./overlay_image.nv12"
+      }
+   }
+}

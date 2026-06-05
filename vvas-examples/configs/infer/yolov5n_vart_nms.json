@@ -1,0 +1,64 @@
+{
+  "preprocess-config": {
+    "xclbin-location": "/run/media/mmcblk0p1/x_plus_ml.xclbin",
+    "library-name": "libvvas_image_process_hw_lib.so",
+    "library-config": "{\"kernel-name\":\"image_processing:{image_processing_1}\"}",
+    "mean-r": 0.0,
+    "mean-g": 0.0,
+    "mean-b": 0.0,
+    "scale-r": 0.0039215,
+    "scale-g": 0.0039215,
+    "scale-b": 0.0039215,
+    "maintain-aspect-ratio": 1,
+    "symmetric-padding": 1
+  },
+  "infer-config": {
+    "inference-level": 1,
+    "model-format": "RGB",
+    "inference-backend-runtime": "vart",
+    "vart-config": {
+      "vart-model-path": "/dev/shm/models/yolov5n/yolov5n/yolov5n.rai"
+    }
+  },
+  "postprocess-config": {
+    "library-path": "/usr/lib/libvvascore_postprocess_vart.so",
+    "library-config": {
+      "topk": 1,
+      "label-file-path": "/etc/vai/models/yolox_m_int8/data/coco_data_labels.txt",
+      "type": "NMS",
+      "nms-threshold": 0.4,
+      "conf-threshold": 0.017,
+      "post-process-print": "false",
+      "model-params": {
+        "is-obj-score-included": "true",
+        "grid-shape": [
+          [
+            80,
+            80
+          ],
+          [
+            40,
+            40
+          ],
+          [
+            20,
+            20
+          ]
+        ],
+        "num-anchorboxes": [
+          3,
+          3,
+          3
+        ],
+        "anchors": [],
+        "is-scaling-required": "false",
+        "input-layout": [
+          "HCWNC4"
+        ],
+        "output-layout": [
+          "NHC"
+        ]
+      }
+    }
+  }
+}

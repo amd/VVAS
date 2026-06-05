@@ -1,0 +1,42 @@
+{
+  "preprocess-config": {
+    "xclbin-location": "/run/media/mmcblk0p1/x_plus_ml.xclbin",
+    "library-name": "libvvas_image_process_hw_lib.so",
+    "library-config": "{\"kernel-name\":\"image_processing:{image_processing_1}\"}",
+     "mean-r": 0.0,
+    "mean-g": 0.0,
+    "mean-b": 0.0,
+    "scale-r": 1.0,
+    "scale-g": 1.0,
+    "scale-b": 1.0,
+    "maintain-aspect-ratio": 1,
+    "symmetric-padding": 1 
+  },
+  "infer-config": {
+    "inference-level": 1,
+    "model-format": "RGB",
+    "inference-backend-runtime": "onnxrt",
+    "onnxrt-config": {
+      "onnx-model-path": "/etc/vai/models/yolox_m_int8/yolox_m_int8.onnx",
+      "input-tensor-layout": "NCHW",
+      "onnxrt-ep": "vitisai",
+      "vitisai-ep-config": {
+        "config-file-path": "/etc/vai/models/yolox_m_int8/vitisai_config.json",
+        "cache-dir": "/etc/vai/models",
+        "cache-key": "yolox_m_int8"
+      }
+    }
+  },
+  "postprocess-config": {
+    "library-path": "/usr/lib/libvvascore_postprocess_yolo-1.0.so",
+    "library-config": {
+         "conf_thresh": 0.35,
+      "iou_thresh": 0.30,
+      "class_agnostic": false,
+      "multi_label": false,
+      "apply_sigmoid": false,
+      "box_grid_decode": true,
+      "preds_per_location": 1
+    }
+  }
+}

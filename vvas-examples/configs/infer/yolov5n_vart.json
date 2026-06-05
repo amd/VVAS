@@ -1,0 +1,33 @@
+{
+  "preprocess-config": {
+    "xclbin-location": "/run/media/mmcblk0p1/x_plus_ml.xclbin",
+    "library-name": "libvvas_image_process_hw_lib.so",
+    "library-config": "{\"kernel-name\":\"image_processing:{image_processing_1}\"}",
+    "mean-r": 0.0,
+    "mean-g": 0.0,
+    "mean-b": 0.0,
+    "scale-r": 0.0039215,
+    "scale-g": 0.0039215,
+    "scale-b": 0.0039215,
+    "maintain-aspect-ratio": 1,
+    "symmetric-padding": 1
+  },
+  "infer-config": {
+    "inference-level": 1,
+    "model-format": "RGB",
+    "inference-backend-runtime": "vart",
+    "vart-config": {
+      "vart-model-path": "/dev/shm/models/yolov5n/yolov5n/yolov5n.rai"
+    }
+  },
+  "postprocess-config": {
+    "library-path": "/usr/lib/libvvascore_postprocess_yolo-1.0.so",
+    "library-config": {
+      "conf_thresh": 0.25,
+      "iou_thresh": 0.5,
+      "class_agnostic": false,
+      "multi_label": false,
+      "preds_per_location": 1
+    }
+  }
+}

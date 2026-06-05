@@ -1,0 +1,23 @@
+{
+  "infer-config": {
+    "model-format": "RGB",
+    "inference-backend-runtime": "onnxrt",
+    "onnxrt-config": {
+      "onnx-model-path": "/dev/shm/models/resnet50/ResNet50.onnx",
+      "input-tensor-layout": "NCHW",
+      "onnxrt-ep": "vitisai",
+      "vitisai-ep-config": {
+        "config-file-path": "/dev/shm/models/resnet50/vitisai_config.json",
+        "cache-dir": "/dev/shm/models/resnet50",
+        "cache-key": "ResNet50"
+      }
+    }
+  },
+  "postprocess-config": {
+    "library-path": "/usr/lib/libvvascore_postprocess_resnet50-1.0.so",
+    "library-config": {
+      "topk": 1,
+      "label-file-path": "/etc/vvas/configs/infer/imagenet-classes-1000.txt"
+    }
+  }
+}
