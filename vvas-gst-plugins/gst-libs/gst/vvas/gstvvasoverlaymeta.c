@@ -181,6 +181,160 @@ add_and_copy_overlay_meta (GstBuffer * dest, GstVvasOverlayMeta * smeta)
   return TRUE;
 }
 
+static gint32
+clamp_overlay_coordinate (gint64 value, guint limit)
+{
+  if (!limit || value < 0)
+    return 0;
+  if ((guint64) value >= limit)
+    return (gint32) limit - 1;
+  return (gint32) value;
+}
+
+static void
+translate_overlay_point (VvasOverlayCoordinates * point, guint origin_x,
+    guint origin_y, guint tile_width, guint tile_height, guint master_width,
+    guint master_height)
+{
+  point->x = clamp_overlay_coordinate (
+      (gint64) origin_x +
+      clamp_overlay_coordinate (point->x, tile_width), master_width);
+  point->y = clamp_overlay_coordinate (
+      (gint64) origin_y +
+      clamp_overlay_coordinate (point->y, tile_height), master_height);
+}
+
+static void
+translate_overlay_rect (VvasOverlayRectParams * rect, guint origin_x,
+    guint origin_y, guint tile_width, guint tile_height, guint master_width,
+    guint master_height)
+{
+  gint64 left = CLAMP ((gint64) rect->points.x, 0, (gint64) tile_width);
+  gint64 top = CLAMP ((gint64) rect->points.y, 0, (gint64) tile_height);
+  gint64 right = CLAMP ((gint64) rect->points.x + rect->width, 0,
+      (gint64) tile_width);
+  gint64 bottom = CLAMP ((gint64) rect->points.y + rect->height, 0,
+      (gint64) tile_height);
+
+  left = CLAMP ((gint64) origin_x + left, 0, (gint64) master_width);
+  top = CLAMP ((gint64) origin_y + top, 0, (gint64) master_height);
+  right = CLAMP ((gint64) origin_x + right, 0, (gint64) master_width);
+  bottom = CLAMP ((gint64) origin_y + bottom, 0, (gint64) master_height);
+  rect->points.x = (gint32) MIN (left,
+      master_width ? (gint64) master_width - 1 : 0);
+  rect->points.y = (gint32) MIN (top,
+      master_height ? (gint64) master_height - 1 : 0);
+  rect->width = right > left ? (guint32) (right - left) : 0;
+  rect->height = bottom > top ? (guint32) (bottom - top) : 0;
+}
+
+static void
+translate_overlay_shape_info (VvasOverlayShapeInfo * shape_info,
+    guint origin_x, guint origin_y, guint tile_width, guint tile_height,
+    guint master_width, guint master_height)
+{
+  VvasList *head;
+
+  for (head = shape_info->rect_params; head; head = head->next)
+    translate_overlay_rect ((VvasOverlayRectParams *) head->data, origin_x,
+        origin_y, tile_width, tile_height, master_width, master_height);
+
+  for (head = shape_info->text_params; head; head = head->next) {
+    VvasOverlayTextParams *text = (VvasOverlayTextParams *) head->data;
+
+    translate_overlay_point (&text->points, origin_x, origin_y, tile_width,
+        tile_height, master_width, master_height);
+  }
+  for (head = shape_info->line_params; head; head = head->next) {
+    VvasOverlayLineParams *line = (VvasOverlayLineParams *) head->data;
+
+    translate_overlay_point (&line->start_pt, origin_x, origin_y, tile_width,
+        tile_height, master_width, master_height);
+    translate_overlay_point (&line->end_pt, origin_x, origin_y, tile_width,
+        tile_height, master_width, master_height);
+  }
+  for (head = shape_info->arrow_params; head; head = head->next) {
+    VvasOverlayArrowParams *arrow = (VvasOverlayArrowParams *) head->data;
+
+    translate_overlay_point (&arrow->start_pt, origin_x, origin_y, tile_width,
+        tile_height, master_width, master_height);
+    translate_overlay_point (&arrow->end_pt, origin_x, origin_y, tile_width,
+        tile_height, master_width, master_height);
+  }
+  for (head = shape_info->circle_params; head; head = head->next) {
+    VvasOverlayCircleParams *circle = (VvasOverlayCircleParams *) head->data;
+    guint local_x = clamp_overlay_coordinate (circle->center_pt.x, tile_width);
+    guint local_y = clamp_overlay_coordinate (circle->center_pt.y, tile_height);
+    guint max_radius = MIN (MIN (local_x,
+            tile_width ? tile_width - 1 - local_x : 0),
+        MIN (local_y, tile_height ? tile_height - 1 - local_y : 0));
+
+    circle->radius = MIN (circle->radius, max_radius);
+    translate_overlay_point (&circle->center_pt, origin_x, origin_y,
+        tile_width, tile_height, master_width, master_height);
+  }
+  for (head = shape_info->polygn_params; head; head = head->next) {
+    VvasOverlayPolygonParams *polygon = (VvasOverlayPolygonParams *) head->data;
+    VvasList *point;
+
+    for (point = polygon->poly_pts; point; point = point->next)
+      translate_overlay_point ((VvasOverlayCoordinates *) point->data,
+          origin_x, origin_y, tile_width, tile_height, master_width,
+          master_height);
+  }
+  for (head = shape_info->mask_params; head; head = head->next) {
+    VvasOverlayMaskParams *mask = (VvasOverlayMaskParams *) head->data;
+
+    translate_overlay_rect (&mask->mask_roi, origin_x, origin_y, tile_width,
+        tile_height, master_width, master_height);
+  }
+}
+
+gboolean
+gst_vvas_overlay_meta_append_translated (GstVvasOverlayMeta * dest,
+    const GstVvasOverlayMeta * src, guint origin_x, guint origin_y,
+    guint tile_width, guint tile_height, guint master_width,
+    guint master_height)
+{
+  VvasOverlayShapeInfo copied;
+
+  g_return_val_if_fail (dest != NULL, FALSE);
+  g_return_val_if_fail (src != NULL, FALSE);
+  if (!tile_width || !tile_height || !master_width || !master_height)
+    return FALSE;
+
+  vvas_overlay_shape_info_init (&copied);
+  vvas_overlay_shape_info_copy (&copied,
+      (VvasOverlayShapeInfo *) & src->shape_info);
+  translate_overlay_shape_info (&copied, origin_x, origin_y, tile_width,
+      tile_height, master_width, master_height);
+
+  dest->shape_info.rect_params =
+      vvas_list_concat (dest->shape_info.rect_params, copied.rect_params);
+  dest->shape_info.text_params =
+      vvas_list_concat (dest->shape_info.text_params, copied.text_params);
+  dest->shape_info.line_params =
+      vvas_list_concat (dest->shape_info.line_params, copied.line_params);
+  dest->shape_info.arrow_params =
+      vvas_list_concat (dest->shape_info.arrow_params, copied.arrow_params);
+  dest->shape_info.circle_params =
+      vvas_list_concat (dest->shape_info.circle_params, copied.circle_params);
+  dest->shape_info.polygn_params =
+      vvas_list_concat (dest->shape_info.polygn_params, copied.polygn_params);
+  dest->shape_info.mask_params =
+      vvas_list_concat (dest->shape_info.mask_params, copied.mask_params);
+  dest->shape_info.num_rects += copied.num_rects;
+  dest->shape_info.num_text += copied.num_text;
+  dest->shape_info.num_lines += copied.num_lines;
+  dest->shape_info.num_arrows += copied.num_arrows;
+  dest->shape_info.num_circles += copied.num_circles;
+  dest->shape_info.num_polys += copied.num_polys;
+  dest->shape_info.num_masks += copied.num_masks;
+
+  memset (&copied, 0, sizeof (copied));
+  return TRUE;
+}
+
 static gboolean
 gst_vvas_overlay_meta_transform (GstBuffer * dest, GstMeta * meta,
     GstBuffer * buffer, GQuark type, gpointer data)

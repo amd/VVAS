@@ -144,4 +144,7 @@ private:
    */
   VvasInferResult* convert_detection_result(
     const vart::DetectionResData* detection);
+
+  VvasInferResult* convert_segmentation_result(
+    const vart::SegmentationResData* segmentation);
 };

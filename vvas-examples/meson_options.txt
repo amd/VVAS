@@ -1,0 +1,6 @@
+option(
+  'mipi-camera',
+  type : 'boolean',
+  value : false,
+  description : 'Install VEK385 MIPI camera example scripts and configs',
+)

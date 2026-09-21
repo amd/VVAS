@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2020 - 2022 Xilinx, Inc.
- * Copyright (C) 2022 - 2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022 - 2026 Advanced Micro Devices, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,9 @@
  */
 
 #include <gst/vvas/gstvvascoreutils.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <unistd.h>
 
 
 typedef struct
@@ -25,23 +28,116 @@ typedef struct
   GstVideoFrame *vframe;
 } VvasGstUserData;
 
+gboolean
+gst_vvas_buffer_make_dmabuf_memory_writable (GstBuffer **buf_p)
+{
+  GstAllocator *allocator = NULL;
+  GstBuffer *buf;
+  GstBuffer *wrapper = NULL;
+  GstMemory *mem;
+  GstMemory *alias = NULL;
+  gsize size;
+  gsize offset;
+  gsize maxsize;
+  gint source_fd;
+  gint alias_fd = -1;
+  guint i, n;
+
+  g_return_val_if_fail (buf_p != NULL, FALSE);
+  g_return_val_if_fail (GST_IS_BUFFER (*buf_p), FALSE);
+
+  buf = *buf_p;
+
+  if (!gst_buffer_is_writable (buf)) {
+    wrapper = gst_buffer_new ();
+    if (!wrapper)
+      return FALSE;
+    if (!gst_buffer_copy_into (wrapper, buf, GST_BUFFER_COPY_METADATA, 0, -1)) {
+      gst_buffer_unref (wrapper);
+      return FALSE;
+    }
+    n = gst_buffer_n_memory (buf);
+    for (i = 0; i < n; i++) {
+      mem = gst_buffer_peek_memory (buf, i);
+      gst_buffer_append_memory (wrapper, gst_memory_ref (mem));
+    }
+    gst_buffer_unref (buf);
+    *buf_p = wrapper;
+    buf = wrapper;
+  }
+
+  if (gst_buffer_is_all_memory_writable (buf))
+    return TRUE;
+
+  if (gst_buffer_n_memory (buf) != 1) {
+    GST_ERROR ("buffer %p must contain exactly one DMA-BUF memory", buf);
+    return FALSE;
+  }
+
+  mem = gst_buffer_peek_memory (buf, 0);
+  if (!gst_is_dmabuf_memory (mem)) {
+    GST_ERROR ("buffer %p does not contain DMA-BUF memory", buf);
+    return FALSE;
+  }
+
+  size = gst_memory_get_sizes (mem, &offset, &maxsize);
+  if (maxsize == 0 || offset > maxsize || size > maxsize - offset) {
+    GST_ERROR ("invalid DMA-BUF layout size=%zu offset=%zu maxsize=%zu",
+        size, offset, maxsize);
+    return FALSE;
+  }
+
+  source_fd = gst_dmabuf_memory_get_fd (mem);
+  if (source_fd < 0) {
+    GST_ERROR ("failed to get DMA-BUF fd from memory %p", mem);
+    return FALSE;
+  }
+  alias_fd = fcntl (source_fd, F_DUPFD_CLOEXEC, 0);
+  if (alias_fd < 0) {
+    GST_ERROR ("failed to duplicate DMA-BUF fd %d: %s", source_fd,
+        g_strerror (errno));
+    return FALSE;
+  }
+  allocator = gst_dmabuf_allocator_new ();
+  alias = gst_dmabuf_allocator_alloc (allocator, alias_fd, maxsize);
+  gst_object_unref (allocator);
+  if (!alias) {
+    GST_ERROR ("failed to wrap duplicated DMA-BUF fd %d", alias_fd);
+    close (alias_fd);
+    return FALSE;
+  }
+
+  gst_memory_resize (alias, offset, size);
+  gst_buffer_replace_memory (buf, 0, alias);
+
+  if (!gst_buffer_is_all_memory_writable (buf)) {
+    GST_ERROR ("DMA-BUF alias on buffer %p is not writable", buf);
+    return FALSE;
+  }
+
+  GST_DEBUG
+      ("created writable DMA-BUF alias for buffer %p maxsize=%zu size=%zu", buf,
+      maxsize, size);
+  return TRUE;
+}
+
 
 VvasLogLevel
 vvas_get_core_log_level (GstDebugLevel gst_level)
 {
   switch (gst_level) {
     case GST_LEVEL_NONE:
-      return LOG_LEVEL_NONE;
+      return VVAS_LOG_LEVEL_NONE;
     case GST_LEVEL_ERROR:
-      return LOG_LEVEL_ERROR;
+      return VVAS_LOG_LEVEL_ERROR;
     case GST_LEVEL_WARNING:
-      return LOG_LEVEL_WARNING;
+      return VVAS_LOG_LEVEL_WARNING;
     case GST_LEVEL_FIXME:
-      return LOG_LEVEL_FIXME;
+      return VVAS_LOG_LEVEL_FIXME;
     case GST_LEVEL_INFO:
-      return LOG_LEVEL_INFO;
+      return VVAS_LOG_LEVEL_INFO;
     default:
-      return LOG_LEVEL_DEBUG;
+      return VVAS_LOG_LEVEL_DEBUG;
   }
 }
 
@@ -476,8 +572,11 @@ vvas_memory_from_gstbuffer (VvasContext *vvas_ctx, uint8_t mbank_idx,
 
       priv->mem_info.alloc_type = alloc_type;
       priv->mem_info.alloc_flags = VVAS_ALLOC_FLAG_NONE;        /* currently gstreamer allocator supports both device and host memory allocation */
-      priv->mem_info.mbank_idx = mbank_idx;     /* Note: should derive mbank_idx from GstMemory. */
-
+      priv->mem_info.mbank_idx = gst_vvas_memory_get_mem_bank (mem);
+      if (priv->mem_info.mbank_idx == (guint) - 1) {
+        GST_ERROR ("failed to get memory bank from GstVvasMemory");
+        goto error;
+      }
 #ifdef XLNX_PCIe_PLATFORM
       gst_syncflag = gst_vvas_memory_get_sync_flag (mem);
       priv->mem_info.sync_flags = VVAS_DATA_SYNC_NONE;
@@ -635,6 +734,13 @@ vvas_videoframe_from_gstbuffer (VvasContext *vvas_ctx, int8_t mbank_idx,
     }
 
     if (gst_is_vvas_memory (mem)) {
+      guint actual_mbank = gst_vvas_memory_get_mem_bank (mem);
+
+      if (actual_mbank == (guint) - 1) {
+        GST_ERROR ("failed to get memory bank from GstVvasMemory");
+        goto error;
+      }
+      priv->mbank_idx = actual_mbank;
       priv->boh =
           vvas_xrt_create_sub_bo (gst_vvas_allocator_get_bo (mem), priv->size,
           0);
@@ -669,7 +775,7 @@ vvas_videoframe_from_gstbuffer (VvasContext *vvas_ctx, int8_t mbank_idx,
     priv->mem_info.alloc_type = VVAS_ALLOC_TYPE_CMA;
     /* currently gstreamer allocator supports both device and host memory allocation */
     priv->mem_info.alloc_flags = VVAS_ALLOC_FLAG_NONE;
-    priv->mem_info.mbank_idx = mbank_idx;
+    priv->mem_info.mbank_idx = priv->mbank_idx;
     priv->mem_info.sync_flags = VVAS_DATA_SYNC_NONE;
 #ifdef XLNX_PCIe_PLATFORM
 
@@ -826,6 +932,13 @@ vvas_videoframe_from_gstbuffer_with_vvas_video_format (VvasContext *vvas_ctx,
     }
 
     if (gst_is_vvas_memory (mem)) {
+      guint actual_mbank = gst_vvas_memory_get_mem_bank (mem);
+
+      if (actual_mbank == (guint) - 1) {
+        GST_ERROR ("failed to get memory bank from GstVvasMemory");
+        goto error;
+      }
+      priv->mbank_idx = actual_mbank;
       priv->boh =
           vvas_xrt_create_sub_bo (gst_vvas_allocator_get_bo (mem), priv->size,
           0);
@@ -860,7 +973,7 @@ vvas_videoframe_from_gstbuffer_with_vvas_video_format (VvasContext *vvas_ctx,
     priv->mem_info.alloc_type = VVAS_ALLOC_TYPE_CMA;
     /* currently gstreamer allocator supports both device and host memory allocation */
     priv->mem_info.alloc_flags = VVAS_ALLOC_FLAG_NONE;
-    priv->mem_info.mbank_idx = mbank_idx;
+    priv->mem_info.mbank_idx = priv->mbank_idx;
     priv->mem_info.sync_flags = VVAS_DATA_SYNC_NONE;
 #ifdef XLNX_PCIe_PLATFORM
 

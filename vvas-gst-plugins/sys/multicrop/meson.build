@@ -18,7 +18,7 @@
 gstvvas_xmulticrop = library('gstvvas_xmulticrop', 'gstvvas_xmulticrop.c',
   c_args : gst_plugins_vvas_args,
   include_directories : [configinc, libsinc],
-  dependencies : [gstvideo_dep, gst_dep, gstvvasalloc_dep, gstvvaspool_dep, dl_dep, gstallocators_dep, uuid_dep, gstvvasinfermeta_dep, gstvvashdrmeta_dep, gstvvascoreutils_dep, vvascore_dep],
+  dependencies : [gstvideo_dep, gst_dep, gstvvasalloc_dep, gstvvaspool_dep, dl_dep, gstallocators_dep, uuid_dep, gstvvasinfermeta_dep, gstvvashdrmeta_dep, gstvvascoreutils_dep, vvascore_dep, gstvvaslogbridge_dep],
   install : true,
   install_dir : plugins_install_dir,
 )

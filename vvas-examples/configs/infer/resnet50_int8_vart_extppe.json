@@ -1,0 +1,17 @@
+{
+  "infer-config": {
+    "inference-level": 1,
+    "model-format": "RGB",
+    "inference-backend-runtime": "vart",
+    "vart-config": {
+      "vart-model-path": "/etc/vai/models/resnet50_int8/resnet50_int8.rai"
+    }
+  },
+  "postprocess-config": {
+    "library-path": "/usr/lib/libvvascore_postprocess_resnet50-1.0.so",
+    "library-config": {
+      "topk": 1,
+      "label-file-path": "/etc/vvas/configs/infer/imagenet-classes-1000.txt"
+    }
+  }
+}

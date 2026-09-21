@@ -39,10 +39,14 @@
 #include <vvas_core/vvas_overlay.h>
 #include "gstvvas_xoverlay.h"
 #include <gst/vvas/gstvvasutils.h>
+#include <gst/vvas/gstvvasallocator.h>
 #include <gst/vvas/gstvvasoverlaymeta.h>
+#include <gst/vvas/gstvvastilecompositionleasemeta.h>
 #include <gst/vvas/gstvvascoreutils.h>
+#include <gst/vvas/gstvvaslogbridge.h>
 #include <vvas_core/vvas_memory.h>
 #include <vvas_core/vvas_memory_priv.h>
+#include <vvas_core/vvas_video_priv.h>
 
 /** @def DEFAULT_KERNEL_NAME
  *  @brief Default kernel name of boundingbox IP
@@ -144,7 +148,8 @@ enum
 static GstStaticPadTemplate sink_template = GST_STATIC_PAD_TEMPLATE ("sink",
     GST_PAD_SINK,
     GST_PAD_ALWAYS,
-    GST_STATIC_CAPS (GST_VIDEO_CAPS_MAKE ("{NV12, RGB, BGR, GRAY8, BGRA, RGBA}")));
+    GST_STATIC_CAPS (GST_VIDEO_CAPS_MAKE
+        ("{NV12, RGB, BGR, GRAY8, BGRA, RGBA}")));
 
 /**
  *  @brief Defines source pad template
@@ -152,7 +157,8 @@ static GstStaticPadTemplate sink_template = GST_STATIC_PAD_TEMPLATE ("sink",
 static GstStaticPadTemplate src_template = GST_STATIC_PAD_TEMPLATE ("src",
     GST_PAD_SRC,
     GST_PAD_ALWAYS,
-    GST_STATIC_CAPS (GST_VIDEO_CAPS_MAKE ("{NV12, RGB, BGR, GRAY8, BGRA, RGBA}")));
+    GST_STATIC_CAPS (GST_VIDEO_CAPS_MAKE
+        ("{NV12, RGB, BGR, GRAY8, BGRA, RGBA}")));
 
 
 /** @struct vvas_bbox_acc_roi
@@ -208,7 +214,8 @@ G_DEFINE_TYPE_WITH_PRIVATE (GstVvas_XOverlay, gst_vvas_xoverlay,
 /** @def GST_VVAS_XOVERLAY_PRIVATE(self)
  *  @brief Get instance of GstVvas_XOverlayPrivate structure
  */
-#define GST_VVAS_XOVERLAY_PRIVATE(self) (GstVvas_XOverlayPrivate *) (gst_vvas_xoverlay_get_instance_private (self))
+#define GST_VVAS_XOVERLAY_PRIVATE(self) \
+  (GstVvas_XOverlayPrivate *) (gst_vvas_xoverlay_get_instance_private (self))
 
 /* Functions declaration */
 static void gst_vvas_xoverlay_set_property (GObject * object, guint prop_id,
@@ -217,11 +224,232 @@ static void gst_vvas_xoverlay_set_property (GObject * object, guint prop_id,
 static void gst_vvas_xoverlay_get_property (GObject * object, guint prop_id,
     GValue * value, GParamSpec * pspec);
 
+static GstFlowReturn
+gst_vvas_xoverlay_complete_tile_composition (GstVvas_XOverlay * self,
+    GstBuffer * buffer)
+{
+  GstVvasTileCompositionLeaseMeta *meta =
+      gst_buffer_get_vvas_tile_composition_lease_meta (buffer);
+  GstVvasTileCompositionResult result;
+
+  if (!meta ||
+      gst_vvas_tile_composition_lease_get_role (meta->lease) !=
+      GST_VVAS_TILE_COMPOSITION_LEASE_OUTPUT)
+    return GST_FLOW_OK;
+
+  result =
+      gst_vvas_tile_composition_coordinator_complete_processing (meta->lease);
+  if (result == GST_VVAS_TILE_COMPOSITION_RESULT_FLUSHING)
+    return GST_FLOW_FLUSHING;
+  if (result != GST_VVAS_TILE_COMPOSITION_RESULT_OK &&
+      result != GST_VVAS_TILE_COMPOSITION_RESULT_DUPLICATE) {
+    GST_ERROR_OBJECT (self, "failed to publish tile composition output: %s",
+        gst_vvas_tile_composition_result_name (result));
+    return GST_FLOW_ERROR;
+  }
+  return GST_FLOW_OK;
+}
+
 static gboolean
-gst_vvas_xoverlay_set_caps (GstBaseTransform * trans, GstCaps * incaps,
-    GstCaps * outcaps)
+gst_vvas_xoverlay_sync_tile_composition (GstVvas_XOverlay * self,
+    GstBuffer * buffer, GstMapFlags flags)
+{
+  GstVvasTileCompositionLeaseMeta *meta =
+      gst_buffer_get_vvas_tile_composition_lease_meta (buffer);
+  GstMemory *memory;
+
+  g_return_val_if_fail (flags == GST_MAP_READ || flags == GST_MAP_WRITE, FALSE);
+
+  if (!meta ||
+      gst_vvas_tile_composition_lease_get_role (meta->lease) !=
+      GST_VVAS_TILE_COMPOSITION_LEASE_OUTPUT)
+    return TRUE;
+  if (gst_buffer_n_memory (buffer) != 1) {
+    GST_ERROR_OBJECT (self,
+        "tile composition output must contain exactly one memory");
+    return FALSE;
+  }
+
+  memory = gst_buffer_peek_memory (buffer, 0);
+  if (!gst_is_vvas_memory (memory)) {
+    GST_ERROR_OBJECT (self, "tile composition output is not VVAS backed");
+    return FALSE;
+  }
+
+  if (flags == GST_MAP_READ)
+    gst_vvas_memory_set_sync_flag (memory, VVAS_SYNC_FROM_DEVICE);
+
+  if (!gst_vvas_memory_sync_with_flags (memory, flags) ||
+      (flags == GST_MAP_WRITE && !gst_vvas_memory_sync_bo (memory))) {
+    GST_ERROR_OBJECT (self, "failed to sync tile composition %s device",
+        flags == GST_MAP_READ ? "from" : "to");
+    return FALSE;
+  }
+  GST_LOG_OBJECT (self, "synced tile composition %s device",
+      flags == GST_MAP_READ ? "from" : "to");
+  return TRUE;
+}
+
+/* Overlay drawing uses planes[0].stride. Prefer GstVideoMeta stride when
+ * it differs from the caps stride, and check the active span against
+ * GstMemory maxsize rather than the tight caps size. */
+static gboolean
+gst_vvas_xoverlay_apply_videometa_stride (GstVvas_XOverlay *self,
+    GstBuffer *buffer, VvasVideoFrame *vvas_frame)
+{
+  GstVideoMeta *vmeta;
+  VvasVideoFramePriv *frame_priv;
+  GstMemory *mem;
+  gsize row_bytes;
+  gsize stride;
+  gsize active_span;
+  gsize mem_size;
+  gsize mem_offset;
+  gsize mem_maxsize;
+  gint caps_stride;
+
+  g_return_val_if_fail (buffer != NULL, FALSE);
+  g_return_val_if_fail (vvas_frame != NULL, FALSE);
+
+  vmeta = gst_buffer_get_video_meta (buffer);
+  if (!vmeta)
+    return TRUE;
+
+  if (vmeta->n_planes != 1 || vmeta->stride[0] <= 0 || vmeta->height == 0 ||
+      (vmeta->format != GST_VIDEO_FORMAT_BGR &&
+          vmeta->format != GST_VIDEO_FORMAT_RGB))
+    return TRUE;
+
+  row_bytes = (gsize) vmeta->width *
+      GST_VIDEO_INFO_COMP_PSTRIDE (self->priv->in_vinfo, 0);
+  stride = (gsize) vmeta->stride[0];
+  if (stride < row_bytes ||
+      (gsize) (vmeta->height - 1) > (G_MAXSIZE - row_bytes) / stride) {
+    GST_ERROR_OBJECT (self, "invalid VideoMeta stride %" G_GSIZE_FORMAT,
+        stride);
+    return FALSE;
+  }
+
+  active_span = (gsize) (vmeta->height - 1) * stride + row_bytes;
+  if (gst_buffer_n_memory (buffer) < 1)
+    return FALSE;
+  mem = gst_buffer_peek_memory (buffer, 0);
+  mem_size = gst_memory_get_sizes (mem, &mem_offset, &mem_maxsize);
+  if (vmeta->offset[0] > mem_maxsize ||
+      active_span > mem_maxsize - vmeta->offset[0]) {
+    GST_ERROR_OBJECT (self,
+        "VideoMeta stride span %" G_GSIZE_FORMAT
+        " exceeds DMA-BUF maxsize %" G_GSIZE_FORMAT " (size=%" G_GSIZE_FORMAT
+        ")", active_span, mem_maxsize, mem_size);
+    return FALSE;
+  }
+
+  frame_priv = (VvasVideoFramePriv *) vvas_frame;
+  frame_priv->planes[0].stride = stride;
+  frame_priv->planes[0].elevation = vmeta->height;
+  frame_priv->planes[0].size = active_span;
+  frame_priv->size = active_span;
+
+  caps_stride = GST_VIDEO_INFO_PLANE_STRIDE (self->priv->in_vinfo, 0);
+  if ((gsize) caps_stride != stride) {
+    GST_INFO_OBJECT (self,
+        "using VideoMeta stride %" G_GSIZE_FORMAT " (caps stride %d)",
+        stride, caps_stride);
+  }
+  return TRUE;
+}
+
+static VvasVideoFrame *
+gst_vvas_xoverlay_map_tile_composition (GstVvas_XOverlay * self,
+    GstBuffer * buffer, GstMapFlags flags, GstVideoFrame ** mapped_frame)
+{
+  GstVideoMeta *vmeta = gst_buffer_get_video_meta (buffer);
+  GstVideoFrame *frame = NULL;
+  VvasVideoFrame *vvas_frame = NULL;
+  VvasVideoInfo vinfo = { 0, };
+  VvasReturnType vret;
+  void *data[VVAS_VIDEO_MAX_PLANES] = { NULL };
+
+  g_return_val_if_fail (mapped_frame != NULL, NULL);
+  *mapped_frame = NULL;
+
+  if (!vmeta || vmeta->n_planes != 1 ||
+      vmeta->format != GST_VIDEO_INFO_FORMAT (self->priv->in_vinfo) ||
+      vmeta->width != (guint) GST_VIDEO_INFO_WIDTH (self->priv->in_vinfo) ||
+      vmeta->height != (guint) GST_VIDEO_INFO_HEIGHT (self->priv->in_vinfo) ||
+      (vmeta->format != GST_VIDEO_FORMAT_BGR &&
+          vmeta->format != GST_VIDEO_FORMAT_RGB) || vmeta->stride[0] <= 0) {
+    GST_ERROR_OBJECT (self,
+        "tile composition output has invalid packed RGB video metadata");
+    return NULL;
+  }
+
+  frame = g_new0 (GstVideoFrame, 1);
+  if (!gst_video_frame_map (frame, self->priv->in_vinfo, buffer, flags)) {
+    GST_ERROR_OBJECT (self, "failed to map tile composition output");
+    g_free (frame);
+    return NULL;
+  }
+
+  data[0] = GST_VIDEO_FRAME_PLANE_DATA (frame, 0);
+  vinfo.width = vmeta->width;
+  vinfo.height = vmeta->height;
+  vinfo.fmt = vmeta->format == GST_VIDEO_FORMAT_BGR ?
+      VVAS_VIDEO_FORMAT_BGR : VVAS_VIDEO_FORMAT_RGB;
+  vinfo.n_planes = 1;
+  vvas_frame =
+      vvas_video_frame_alloc_from_data (self->priv->vvas_ctx, &vinfo, data,
+      NULL, NULL, &vret);
+  if (!vvas_frame) {
+    GST_ERROR_OBJECT (self,
+        "failed to create mapped tile composition frame: %d", vret);
+    gst_video_frame_unmap (frame);
+    g_free (frame);
+    return NULL;
+  }
+
+  if (!gst_vvas_xoverlay_apply_videometa_stride (self, buffer, vvas_frame)) {
+    vvas_video_frame_free (vvas_frame);
+    gst_video_frame_unmap (frame);
+    g_free (frame);
+    return NULL;
+  }
+
+  *mapped_frame = frame;
+  return vvas_frame;
+}
+
+static gboolean
+gst_vvas_xoverlay_ensure_writable_dmabuf (GstVvas_XOverlay *self,
+    GstBuffer **inbuf)
+{
+  GstMemory *mem;
+
+  if (gst_buffer_n_memory (*inbuf) != 1)
+    return TRUE;
+
+  mem = gst_buffer_peek_memory (*inbuf, 0);
+  if (!gst_is_dmabuf_memory (mem))
+    return TRUE;
+
+  if (gst_buffer_is_writable (*inbuf) &&
+      gst_buffer_is_all_memory_writable (*inbuf))
+    return TRUE;
+
+  if (!gst_vvas_buffer_make_dmabuf_memory_writable (inbuf)) {
+    GST_ERROR_OBJECT (self,
+        "failed to create writable DMA-BUF memory for overlay");
+    return FALSE;
+  }
+  return TRUE;
+}
+
+static gboolean
+gst_vvas_xoverlay_set_caps (GstBaseTransform *trans, GstCaps *incaps,
+    GstCaps *outcaps)
 {
   GstVvas_XOverlay *self = GST_VVAS_XOVERLAY (trans);
+  GST_VVAS_LOG_SCOPE (self);
   gboolean bret = TRUE;
   GstVvas_XOverlayPrivate *priv = self->priv;
 
@@ -244,13 +472,14 @@ gst_vvas_xoverlay_set_caps (GstBaseTransform * trans, GstCaps * incaps,
  *  @return TRUE on success \n
  *          FALSE on failure
  *  @brief  Opens device handle and creates context for XRT.
- *  @details This API is registered with GObjectClass by overriding GstBaseTransform::start function pointer and
- *          this will be called when element start processing. It opens device context and allocates memory.
+ *  @details This API overrides GstBaseTransform::start. It opens the device
+ *           context and allocates memory when processing starts.
  */
 static gboolean
-gst_vvas_xoverlay_start (GstBaseTransform * trans)
+gst_vvas_xoverlay_start (GstBaseTransform *trans)
 {
   GstVvas_XOverlay *self = GST_VVAS_XOVERLAY (trans);
+  GST_VVAS_LOG_SCOPE (self);
   GstVvas_XOverlayPrivate *priv = self->priv;
   VvasReturnType vret;
 
@@ -285,13 +514,13 @@ gst_vvas_xoverlay_start (GstBaseTransform * trans)
  *  @return TRUE on success \n
  *          FALSE on failure
  *  @brief  Free up allocates memory and invokes vvas_xoverlay_deinit.
- *  @details This API is registered with GObjectClass by overriding GstBaseTransform::stop function pointer and
- *          this will be called when element stops processing.
+ *  @details This API overrides GstBaseTransform::stop and is called when
+ *           processing stops.
  *          It invokes vvas_xoverlay_deinit to free up allocated memory.
  *
  */
 static gboolean
-gst_vvas_xoverlay_stop (GstBaseTransform * trans)
+gst_vvas_xoverlay_stop (GstBaseTransform *trans)
 {
   GstVvas_XOverlay *self = GST_VVAS_XOVERLAY (trans);
   GstVvas_XOverlayPrivate *priv = self->priv;
@@ -319,13 +548,11 @@ gst_vvas_xoverlay_stop (GstBaseTransform * trans)
  *  @fn static void gst_vvas_xoverlay_finalize (GObject * obj)
  *  @param [in] Handle to GstVvas_XOverlay typecast to GObject
  *  @return None
- *  @brief This API will be called during GstVvas_XOverlay object's destruction phase. Close references
- *         to devices and free memories if any
- *  @note After this API GstVvas_XOverlay object \p obj will be destroyed completely. So free all internal
- *        memories held by current object
+ *  @brief Close device references and free memory during object destruction.
+ *  @note After this API, GstVvas_XOverlay object \p obj is destroyed.
  */
 static void
-gst_vvas_xoverlay_finalize (GObject * obj)
+gst_vvas_xoverlay_finalize (GObject *obj)
 {
   GstVvas_XOverlay *self = GST_VVAS_XOVERLAY (obj);
 
@@ -347,8 +574,8 @@ gst_vvas_xoverlay_finalize (GObject * obj)
  *          sequence data as per expectations of bbox accelerator.
  */
 void
-prepare_bbox_data (GstVvas_XOverlay * self,
-    GstVvasOverlayMeta * overlay_meta, GstVideoFormat gst_fmt, guint32 str_idx)
+prepare_bbox_data (GstVvas_XOverlay *self,
+    GstVvasOverlayMeta *overlay_meta, GstVideoFormat gst_fmt, guint32 str_idx)
 {
   guint32 idx, end_idx, loop;
   GstVvas_XOverlayPrivate *priv = self->priv;
@@ -360,13 +587,13 @@ prepare_bbox_data (GstVvas_XOverlay * self,
 
   /* map roi_buf to get user space address */
   vret = vvas_memory_map (priv->roi_data.roi,
-             VVAS_DATA_MAP_WRITE, &roi_buf_info);
+      VVAS_DATA_MAP_WRITE, &roi_buf_info);
   if (vret != VVAS_RET_SUCCESS) {
     GST_ERROR_OBJECT (self,
         "ERROR: Failed to map the roi_buf for write vret = %d", vret);
     return;
   }
-  roi = (gint32 *)roi_buf_info.data;
+  roi = (gint32 *) roi_buf_info.data;
 
   /* check if number of bbox are less or more than MAX_BOXES */
   if ((str_idx + MAX_BOXES) > overlay_meta->shape_info.num_rects)
@@ -423,20 +650,23 @@ prepare_bbox_data (GstVvas_XOverlay * self,
  *  @return TRUE on success \n
  *          FALSE on failure
  *  @brief  This API to draw overlay metadata on frames.
- *  @details This API is registered with GObjectClass by overriding GstBaseTransform::generate_output
- *           function pointer and this will be called for every frame. Bases on overlay metadata it
- *           draws different geometric shapes, text and clock on frames.
+ *  @details This API overrides GstBaseTransform::generate_output and is called
+ *           for every frame. It draws shapes, text and a clock from overlay
+ *           metadata.
  */
 static GstFlowReturn
-gst_vvas_xoverlay_generate_output (GstBaseTransform * trans,
-    GstBuffer ** outbuf)
+gst_vvas_xoverlay_generate_output (GstBaseTransform *trans, GstBuffer **outbuf)
 {
   GstVvas_XOverlay *self = GST_VVAS_XOVERLAY (trans);
+  GST_VVAS_LOG_SCOPE (self);
   GstVvas_XOverlayPrivate *priv = self->priv;
   GstFlowReturn fret = GST_FLOW_OK;
   GstVvasOverlayMeta *overlay_meta;
+  GstVvasTileCompositionLeaseMeta *composition_meta;
+  gboolean composition_output;
   GstMapFlags map_flags;
   GstBuffer *inbuf = NULL;
+  GstVideoFrame *mapped_frame = NULL;
   VvasOverlayFrameInfo *ovlinfo = NULL;
   VvasVideoFrame *vframe = NULL;
 
@@ -450,28 +680,72 @@ gst_vvas_xoverlay_generate_output (GstBaseTransform * trans,
 
   /* Read overlay metadata from inbuf */
   overlay_meta = gst_buffer_get_vvas_overlay_meta (inbuf);
+  composition_meta = gst_buffer_get_vvas_tile_composition_lease_meta (inbuf);
+  composition_output = composition_meta &&
+      gst_vvas_tile_composition_lease_get_role (composition_meta->lease) ==
+      GST_VVAS_TILE_COMPOSITION_LEASE_OUTPUT;
 
   /* If no overlay metadata return without further processing */
   if (!overlay_meta) {
+    fret = gst_vvas_xoverlay_complete_tile_composition (self, inbuf);
+    if (fret != GST_FLOW_OK)
+      goto error;
     *outbuf = inbuf;
     GST_LOG_OBJECT (self, "unable to get overlaymeta from input buffer");
     return GST_FLOW_OK;
   }
 
+  /* The helper may replace inbuf, so re-read metadata from the buffer
+   * that will be mapped. */
+  if (!gst_vvas_xoverlay_ensure_writable_dmabuf (self, &inbuf)) {
+    fret = GST_FLOW_ERROR;
+    goto error;
+  }
+  overlay_meta = gst_buffer_get_vvas_overlay_meta (inbuf);
+  composition_meta = gst_buffer_get_vvas_tile_composition_lease_meta (inbuf);
+  composition_output = composition_meta &&
+      gst_vvas_tile_composition_lease_get_role (composition_meta->lease) ==
+      GST_VVAS_TILE_COMPOSITION_LEASE_OUTPUT;
+  if (!overlay_meta) {
+    GST_ERROR_OBJECT (self, "overlay metadata missing after DMA-BUF alias");
+    fret = GST_FLOW_ERROR;
+    goto error;
+  }
+
   /*Allocate memory for ovlerlay */
   ovlinfo = (VvasOverlayFrameInfo *) calloc (1, sizeof (VvasOverlayFrameInfo));
+
+  if (composition_output &&
+      !gst_vvas_xoverlay_sync_tile_composition (self, inbuf, GST_MAP_READ)) {
+    fret = GST_FLOW_ERROR;
+    goto error;
+  }
 
   map_flags =
       (GstMapFlags) (GST_MAP_READ | GST_VIDEO_FRAME_MAP_FLAG_NO_REF |
       GST_MAP_WRITE);
   /* get vvasframe form gst buffer */
-  vframe = vvas_videoframe_from_gstbuffer (priv->vvas_ctx, DEFAULT_MEM_BANK,
-      inbuf, self->priv->in_vinfo, map_flags);
+  if (composition_output)
+    vframe =
+        gst_vvas_xoverlay_map_tile_composition (self, inbuf, map_flags,
+        &mapped_frame);
+  else
+    vframe = vvas_videoframe_from_gstbuffer (priv->vvas_ctx, DEFAULT_MEM_BANK,
+        inbuf, self->priv->in_vinfo, map_flags);
   if (NULL == vframe) {
     GST_ERROR_OBJECT (self, "Cannot convert input GstBuffer to VvasVideoFrame");
     fret = GST_FLOW_ERROR;
     goto error;
   }
+  if (!composition_output &&
+      !gst_vvas_xoverlay_apply_videometa_stride (self, inbuf, vframe)) {
+    fret = GST_FLOW_ERROR;
+    goto error;
+  }
+
+  GST_INFO_OBJECT (self, "overlay meta rects=%u texts=%u lines=%u",
+      overlay_meta->shape_info.num_rects, overlay_meta->shape_info.num_text,
+      overlay_meta->shape_info.num_lines);
 
   /* Update video frame */
   ovlinfo->frame_info = vframe;
@@ -489,7 +763,8 @@ gst_vvas_xoverlay_generate_output (GstBaseTransform * trans,
   ovlinfo->clk_info.clock_y_offset = self->priv->clock_y_offset;
 
   /* draw requested pattern on the image */
-  if (VVAS_RET_SUCCESS == vvas_overlay_process_frame (priv->vvas_overlay, ovlinfo)) {
+  if (VVAS_RET_SUCCESS == vvas_overlay_process_frame (priv->vvas_overlay,
+          ovlinfo)) {
     GST_DEBUG_OBJECT (self, "ovl process ret success");
   } else {
     /*do we need to update fret here ?  */
@@ -497,7 +772,18 @@ gst_vvas_xoverlay_generate_output (GstBaseTransform * trans,
   }
 
   vvas_video_frame_free (vframe);
+  vframe = NULL;
+  if (mapped_frame) {
+    gst_video_frame_unmap (mapped_frame);
+    g_clear_pointer (&mapped_frame, g_free);
+  }
   free (ovlinfo);
+  ovlinfo = NULL;
+  if (fret == GST_FLOW_OK &&
+      !gst_vvas_xoverlay_sync_tile_composition (self, inbuf, GST_MAP_WRITE))
+    fret = GST_FLOW_ERROR;
+  if (fret == GST_FLOW_OK)
+    fret = gst_vvas_xoverlay_complete_tile_composition (self, inbuf);
 
   *outbuf = inbuf;
   return fret;
@@ -507,6 +793,12 @@ error:
     *outbuf = inbuf;
   if (ovlinfo)
     free (ovlinfo);
+  if (vframe)
+    vvas_video_frame_free (vframe);
+  if (mapped_frame) {
+    gst_video_frame_unmap (mapped_frame);
+    g_free (mapped_frame);
+  }
   return fret;
 }
 
@@ -514,14 +806,12 @@ error:
  *  @fn static void gst_vvas_xoverlay_class_init (GstVvas_XOverlayClass * klass)
  *  @param [in]klass  - Handle to GstVvas_XOverlayClass
  *  @return None
- *  @brief  Add properties and signals of GstVvas_XOverlay to parent GObjectClass \n
- *          and overrides function pointers present in itself and/or its parent class structures
- *  @details This function publishes properties those can be set/get from application on GstVvas_XOverlay object.
- *           And, while publishing a property it also declares type, range of acceptable values, default value,
- *           readability/writability and in which GStreamer state a property can be changed.
+ *  @brief Add GstVvas_XOverlay properties and signals to the parent class.
+ *  @details This function publishes each property's type, range, default,
+ *           access mode and mutable GStreamer states.
  */
 static void
-gst_vvas_xoverlay_class_init (GstVvas_XOverlayClass * klass)
+gst_vvas_xoverlay_class_init (GstVvas_XOverlayClass *klass)
 {
   GObjectClass *gobject_class;
   GstElementClass *gstelement_class;
@@ -601,7 +891,7 @@ gst_vvas_xoverlay_class_init (GstVvas_XOverlayClass * klass)
  *
  */
 static void
-gst_vvas_xoverlay_init (GstVvas_XOverlay * self)
+gst_vvas_xoverlay_init (GstVvas_XOverlay *self)
 {
   GstBaseTransform *btrans = GST_BASE_TRANSFORM (self);
   GstVvas_XOverlayPrivate *priv = GST_VVAS_XOVERLAY_PRIVATE (self);
@@ -620,17 +910,15 @@ gst_vvas_xoverlay_init (GstVvas_XOverlay * self)
  *  @param [in] object - Handle to GstVvas_XOverlay typecast to GObject
  *  @param [in] prop_id - Property ID as defined in enum
  *  @param [in] value - GValue which holds property value set by user
- *  @param [in] pspec - Handle to metadata of a property with property ID \p prop_id
+ *  @param [in] pspec - Property metadata for ID \p prop_id
  *  @return None
- *  @brief This API stores values sent from the user in GstVvas_XOverlay object members.
- *  @details This API is registered with GObjectClass by overriding GObjectClass::set_property function pointer and
- *           this will be invoked when developer sets properties on GstVvas_XOverlay object.
- *           Based on property value type, corresponding g_value_get_xxx API will be called to get 
- *           property value from GValue handle.
+ *  @brief Store user-provided property values in GstVvas_XOverlay.
+ *  @details This API overrides GObjectClass::set_property and reads each
+ *           GValue through the corresponding typed accessor.
  */
 static void
-gst_vvas_xoverlay_set_property (GObject * object, guint prop_id,
-    const GValue * value, GParamSpec * pspec)
+gst_vvas_xoverlay_set_property (GObject *object, guint prop_id,
+    const GValue *value, GParamSpec *pspec)
 {
   GstVvas_XOverlay *self = GST_VVAS_XOVERLAY (object);
 
@@ -665,16 +953,15 @@ gst_vvas_xoverlay_set_property (GObject * object, guint prop_id,
  *  @param [in] object - Handle to GstVvas_XOverlay typecast to GObject
  *  @param [in] prop_id - Property ID as defined in properties enum
  *  @param [in] value - value GValue which holds property value set by user
- *  @param [in] pspec - Handle to metadata of a property with property ID \p prop_id
+ *  @param [in] pspec - Property metadata for ID \p prop_id
  *  @return None
  *  @brief This API gets values from GstVvas_XOverlay object members.
- *  @details This API is registered with GObjectClass by overriding GObjectClass::get_property function pointer and
- *           this will be invoked when developer want gets properties from GstVvas_XOverlay object.
- *           Based on property value type,corresponding g_value_set_xxx API will be called to set value of GValue type.
+ *  @details This API overrides GObjectClass::get_property and writes each
+ *           GValue through the corresponding typed accessor.
  */
 static void
-gst_vvas_xoverlay_get_property (GObject * object, guint prop_id, GValue * value,
-    GParamSpec * pspec)
+gst_vvas_xoverlay_get_property (GObject *object, guint prop_id, GValue *value,
+    GParamSpec *pspec)
 {
   GstVvas_XOverlay *self = GST_VVAS_XOVERLAY (object);
 
@@ -712,8 +999,9 @@ gst_vvas_xoverlay_get_property (GObject * object, guint prop_id, GValue * value,
  * register the element factories and other features
  */
 static gboolean
-plugin_init (GstPlugin * vvas_xoverlay)
+plugin_init (GstPlugin *vvas_xoverlay)
 {
+  gst_vvas_log_bridge_install ();
   return gst_element_register (vvas_xoverlay, "vvas_xoverlay", GST_RANK_PRIMARY,
       GST_TYPE_VVAS_XOVERLAY);
 }

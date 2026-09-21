@@ -22,7 +22,8 @@
 #include <boost/property_tree/json_parser.hpp>
 #include <boost/property_tree/ptree.hpp>
 #include <vart/vart_postprocess_types.hpp>
-#include <vvas_utils/vvas_utils.h>
+#include <vart/vart_inferresult_types.hpp>
+#include <vvas_utils/vvas_infer_results.h>
 #include "vvas_postprocess_vart_wrapper.hpp"
 
 /**
@@ -200,12 +201,18 @@ vart::PostProcessType VvasPostProcessVartWrapper::parse_postprocess_type(
     return vart::PostProcessType::CLASSWISE_NMS;
   } else if (pp_type == "object_count" || pp_type == "object-count") {
     return vart::PostProcessType::OBJECT_COUNT;
+  } else if (pp_type == "softmaxseg" || pp_type == "softmax-seg") {
+    return vart::PostProcessType::SOFTMAXSEG;
+  } else if (pp_type == "sigmoid" || pp_type == "sigmoidseg" || pp_type == "sigmoid-seg") {
+    return vart::PostProcessType::SIGMOIDSEG;
+  } else if (pp_type == "argmaxseg" || pp_type == "argmax-seg") {
+    return vart::PostProcessType::ARGMAXSEG;
   } else {
     throw std::runtime_error("Unsupported type: " + pp_type +
       " (supported: resnet50, yolov2, ssdresnet34, softmax, argmax, topk, nms, threshold, "
       "label_mapping, normalization, anchor_adjustment, calibration_temperature, calibration_platt, "
       "bias_correction, outlier_detection, uncertainty_estimation, distance_iou_nms, soft_nms, "
-      "classwise_nms, object_count)");
+      "classwise_nms, object_count, softmaxseg, sigmoidseg, argmaxseg)");
   }
 }
 
@@ -261,6 +268,10 @@ std::vector<vart::TensorInfo> VvasPostProcessVartWrapper::convert_tensor_info(
       info.direction = vart::TensorDataDirection::INPUT;
     } else {
       throw std::runtime_error("Unsupported tensor data direction for tensor " + std::to_string(i));
+    }
+
+    if (vvas_info[i]->memory_layout && vvas_info[i]->memory_layout[0] != '\0') {
+      info.memory_layout = vvas_info[i]->memory_layout;
     }
 
     vart_tensor_vec.push_back(std::move(info));
@@ -407,6 +418,13 @@ VvasReturnType VvasPostProcessVartWrapper::convert_results(
           break;
         }
 
+        case vart::InferResultType::SEGMENTATION: {
+          vart::SegmentationResData* segmentation =
+            static_cast<vart::SegmentationResData*>(result_data);
+          vvas_result = convert_segmentation_result(segmentation);
+          break;
+        }
+
         case vart::InferResultType::ROOT:
           /** Skip root nodes (used for tree structure) */
           continue;
@@ -502,5 +520,94 @@ VvasInferResult* VvasPostProcessVartWrapper::convert_detection_result(
   det->class_id = detection->class_id;
 
   vvas_result->infer_result_type = VVAS_INFER_RESULT_DETECTION;
+  return vvas_result;
+}
+
+VvasInferResult* VvasPostProcessVartWrapper::convert_segmentation_result(
+  const vart::SegmentationResData* segmentation)
+{
+  if (!segmentation) {
+    return nullptr;
+  }
+
+  VvasInferResult* vvas_result = vvas_infer_result_segmentation_create();
+  if (!vvas_result) {
+    std::cerr << "Failed to create VVAS segmentation result" << std::endl;
+    return nullptr;
+  }
+
+  VvasInferSegmentation* seg = (VvasInferSegmentation*)vvas_result->data;
+  if (!seg) {
+    std::cerr << "Invalid segmentation data pointer in VVAS result" << std::endl;
+    vvas_infer_result_segmentation_free(vvas_result);
+    return nullptr;
+  }
+
+  switch (segmentation->segType) {
+    case vart::SegmentationType::SEMANTIC:
+      seg->type = SEMANTIC;
+      break;
+    case vart::SegmentationType::MEDICAL:
+      seg->type = MEDICAL;
+      break;
+    case vart::SegmentationType::SEG3D:
+      seg->type = SEG3D;
+      break;
+    default:
+      seg->type = SEMANTIC;
+      break;
+  }
+
+  if (segmentation->numOutputs == 0 ||
+      segmentation->numOutputs > VVAS_INFER_MAX_SEGMENTATION_OUTPUTS) {
+    std::cerr << "Invalid segmentation output count: "
+              << segmentation->numOutputs << std::endl;
+    vvas_infer_result_segmentation_free(vvas_result);
+    return nullptr;
+  }
+
+  if (segmentation->width.size() < segmentation->numOutputs ||
+      segmentation->height.size() < segmentation->numOutputs ||
+      segmentation->segmentationMap.size() < segmentation->numOutputs) {
+    std::cerr << "Incomplete segmentation result vectors" << std::endl;
+    vvas_infer_result_segmentation_free(vvas_result);
+    return nullptr;
+  }
+
+  seg->num_outputs = segmentation->numOutputs;
+  seg->owns_data = 1;
+
+  for (uint32_t i = 0; i < segmentation->numOutputs; i++) {
+    seg->width[i] = segmentation->width[i];
+    seg->height[i] = segmentation->height[i];
+
+    if (!seg->width[i] || !seg->height[i] ||
+        !segmentation->segmentationMap[i]) {
+      std::cerr << "Invalid segmentation map at index " << i << std::endl;
+      vvas_infer_result_segmentation_free(vvas_result);
+      return nullptr;
+    }
+
+    size_t pixels = static_cast<size_t>(seg->width[i]) *
+      static_cast<size_t>(seg->height[i]);
+    if (segmentation->segmentationMap[i]->size() < pixels) {
+      std::cerr << "Segmentation map at index " << i
+                << " is smaller than width * height" << std::endl;
+      vvas_infer_result_segmentation_free(vvas_result);
+      return nullptr;
+    }
+
+    size_t map_size = pixels * sizeof(uint16_t);
+    seg->data[i] = malloc(map_size);
+    if (!seg->data[i]) {
+      std::cerr << "Failed to allocate segmentation map at index " << i << std::endl;
+      vvas_infer_result_segmentation_free(vvas_result);
+      return nullptr;
+    }
+
+    memcpy(seg->data[i], segmentation->segmentationMap[i]->data(), map_size);
+  }
+
+  vvas_result->infer_result_type = VVAS_INFER_RESULT_SEGMENTATION;
   return vvas_result;
 }

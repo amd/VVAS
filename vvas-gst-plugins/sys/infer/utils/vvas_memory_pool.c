@@ -59,15 +59,15 @@ typedef struct
  *         On failure, returns NULL.
  */
 VvasMemoryPool *
-vvas_memory_pool_create (VvasContext * vvas_ctx, size_t pool_size,
+vvas_memory_pool_create (VvasContext *vvas_ctx, size_t pool_size,
     VvasAllocationType mem_type, VvasAllocationFlags mem_flags,
-    uint8_t mbank_idx, size_t size, VvasReturnType * ret,
+    uint8_t mbank_idx, size_t size, VvasReturnType *ret,
     VvasMemoryReleaseCallback release_cb, void *user_data)
 {
   VvasMemoryPoolPriv *priv = NULL;
   /* check arguments validity */
   if (!vvas_ctx) {
-    LOG_MESSAGE (LOG_LEVEL_ERROR, DEFAULT_VVAS_LOG_LEVEL,
+    VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_ERROR, DEFAULT_VVAS_LOG_LEVEL,
         "vvas_vvas_ctx is NULL");
     if (ret)
       *ret = VVAS_RET_INVALID_ARGS;
@@ -75,7 +75,7 @@ vvas_memory_pool_create (VvasContext * vvas_ctx, size_t pool_size,
   }
 
   if (!ALLOC_TYPE_IS_VALID (mem_type) || !pool_size || !size) {
-    LOG_ERROR_OBJ (vvas_ctx->logger_handle, "invalid arguments");
+    VVAS_LOG_ERROR_OBJ (vvas_ctx->logger_handle, "invalid arguments");
     if (ret)
       *ret = VVAS_RET_INVALID_ARGS;
     return NULL;
@@ -126,12 +126,13 @@ vvas_memory_pool_create (VvasContext * vvas_ctx, size_t pool_size,
  *         On failure, returns NULL if no memory block is available.
  */
 VvasMemory *
-vvas_memory_pool_acquire_memory (VvasMemoryPool * pool, VvasReturnType * ret)
+vvas_memory_pool_acquire_memory (VvasMemoryPool *pool, VvasReturnType *ret)
 {
   VvasMemoryPoolPriv *priv = (VvasMemoryPoolPriv *) pool;
   VvasMemory *mem = NULL;
   if (!priv) {
-    LOG_MESSAGE (LOG_LEVEL_ERROR, DEFAULT_VVAS_LOG_LEVEL, "invalid arguments");
+    VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_ERROR, DEFAULT_VVAS_LOG_LEVEL,
+        "invalid arguments");
     if (ret)
       *ret = VVAS_RET_INVALID_ARGS;
     return NULL;
@@ -142,9 +143,10 @@ vvas_memory_pool_acquire_memory (VvasMemoryPool * pool, VvasReturnType * ret)
   if (mem) {
     if (ret)
       *ret = VVAS_RET_SUCCESS;
-    LOG_DEBUG_OBJ (priv->ctx->logger_handle, "memory acquired %p", mem);
+    VVAS_LOG_DEBUG_OBJ (priv->ctx->logger_handle, "memory acquired %p", mem);
   } else {
-    LOG_ERROR_OBJ (priv->ctx->logger_handle, "failed to get memory from pool");
+    VVAS_LOG_ERROR_OBJ (priv->ctx->logger_handle,
+        "failed to get memory from pool");
     if (ret)
       *ret = VVAS_RET_ERROR;
   }
@@ -164,13 +166,14 @@ vvas_memory_pool_acquire_memory (VvasMemoryPool * pool, VvasReturnType * ret)
  *         On failure, returns NULL if no memory block is available within the timeout.
  */
 VvasMemory *
-vvas_memory_pool_acquire_memory_with_timeout (VvasMemoryPool * pool,
-    uint64_t timeout_ms, VvasReturnType * ret)
+vvas_memory_pool_acquire_memory_with_timeout (VvasMemoryPool *pool,
+    uint64_t timeout_ms, VvasReturnType *ret)
 {
   VvasMemoryPoolPriv *priv = (VvasMemoryPoolPriv *) pool;
   VvasMemory *mem = NULL;
   if (!priv) {
-    LOG_MESSAGE (LOG_LEVEL_ERROR, DEFAULT_VVAS_LOG_LEVEL, "invalid arguments");
+    VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_ERROR, DEFAULT_VVAS_LOG_LEVEL,
+        "invalid arguments");
     if (ret)
       *ret = VVAS_RET_INVALID_ARGS;
     return NULL;
@@ -179,11 +182,12 @@ vvas_memory_pool_acquire_memory_with_timeout (VvasMemoryPool * pool,
   vvas_mutex_lock (&priv->mutex);
   mem = (VvasMemory *) vvas_queue_dequeue_timeout (priv->queue, timeout_ms);
   if (mem) {
-    LOG_DEBUG_OBJ (priv->ctx->logger_handle, "memory acquired %p", mem);
+    VVAS_LOG_DEBUG_OBJ (priv->ctx->logger_handle, "memory acquired %p", mem);
     if (ret)
       *ret = VVAS_RET_SUCCESS;
   } else {
-    LOG_ERROR_OBJ (priv->ctx->logger_handle, "failed to get memory from pool");
+    VVAS_LOG_ERROR_OBJ (priv->ctx->logger_handle,
+        "failed to get memory from pool");
     if (ret)
       *ret = VVAS_RET_ERROR;
   }
@@ -200,11 +204,12 @@ vvas_memory_pool_acquire_memory_with_timeout (VvasMemoryPool * pool,
  * @return None
  */
 void
-vvas_memory_pool_release_memory (VvasMemoryPool * pool, VvasMemory * mem)
+vvas_memory_pool_release_memory (VvasMemoryPool *pool, VvasMemory *mem)
 {
   VvasMemoryPoolPriv *priv = (VvasMemoryPoolPriv *) pool;
   if (!priv || !mem) {
-    LOG_MESSAGE (LOG_LEVEL_ERROR, DEFAULT_VVAS_LOG_LEVEL, "invalid arguments");
+    VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_ERROR, DEFAULT_VVAS_LOG_LEVEL,
+        "invalid arguments");
     return;
   }
 
@@ -214,7 +219,7 @@ vvas_memory_pool_release_memory (VvasMemoryPool * pool, VvasMemory * mem)
     priv->release_cb (mem, priv->user_data);
   }
 
-  LOG_DEBUG_OBJ (priv->ctx->logger_handle, "memory released %p", mem);
+  VVAS_LOG_DEBUG_OBJ (priv->ctx->logger_handle, "memory released %p", mem);
 }
 
 /**
@@ -224,11 +229,12 @@ vvas_memory_pool_release_memory (VvasMemoryPool * pool, VvasMemory * mem)
  * @return None
  */
 void
-vvas_memory_pool_free (VvasMemoryPool * pool)
+vvas_memory_pool_free (VvasMemoryPool *pool)
 {
   VvasMemoryPoolPriv *priv = (VvasMemoryPoolPriv *) pool;
   if (!priv) {
-    LOG_MESSAGE (LOG_LEVEL_ERROR, DEFAULT_VVAS_LOG_LEVEL, "invalid arguments");
+    VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_ERROR, DEFAULT_VVAS_LOG_LEVEL,
+        "invalid arguments");
     return;
   }
   vvas_mutex_lock (&priv->mutex);

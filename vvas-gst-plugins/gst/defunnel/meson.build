@@ -18,7 +18,7 @@
 gstvvas_xdefunnel = library('gstvvas_xdefunnel', 'gstvvas_xdefunnel.c',
   c_args : gst_plugins_vvas_args,
   include_directories : [configinc, libsinc],
-  dependencies : [gstvideo_dep, gst_dep, gstvvassrcidmeta_dep],
+  dependencies : [gstvideo_dep, gst_dep, gstvvassrcidmeta_dep, gstvvaslogbridge_dep],
   install : true,
   install_dir : plugins_install_dir,
 )

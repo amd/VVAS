@@ -1,0 +1,42 @@
+{
+  "config": {
+    "display-level": -1,
+    "font-size" : 0.5,
+    "font" : 3,
+    "thickness" : 2,
+    "radius": 5,
+    "mask-level" : 1,
+    "mask-alpha" : 0.5,
+    "y-offset" : 0,
+    "draw-above-bbox-flag" : true,
+    "label-filter" : ["class"],
+    "label-color" : [
+      {"level": 1, "red" : 0, "green" : 255, "blue" : 0 },
+      {"level": 2, "red" : 0, "green" : 255, "blue" : 0 },
+      {"level": 3, "red" : 255, "green" : 0, "blue" : 0 }
+    ],
+    "classes" : [
+      { "name": "background",   "red": 0,   "green": 0,   "blue": 0   },
+      { "name": "aeroplane",    "red": 128, "green": 0,   "blue": 0   },
+      { "name": "bicycle",      "red": 0,   "green": 128, "blue": 0   },
+      { "name": "bird",         "red": 128, "green": 128, "blue": 0   },
+      { "name": "boat",         "red": 0,   "green": 0,   "blue": 128 },
+      { "name": "bottle",       "red": 128, "green": 0,   "blue": 128 },
+      { "name": "bus",          "red": 128, "green": 128, "blue": 128 },
+      { "name": "car",          "red": 0,   "green": 128, "blue": 128 },
+      { "name": "cat",          "red": 64,  "green": 0,   "blue": 0   },
+      { "name": "chair",        "red": 192, "green": 0,   "blue": 0   },
+      { "name": "cow",          "red": 64,  "green": 128, "blue": 0   },
+      { "name": "diningtable",  "red": 192, "green": 128, "blue": 0   },
+      { "name": "dog",          "red": 64,  "green": 0,   "blue": 128 },
+      { "name": "horse",        "red": 192, "green": 0,   "blue": 128 },
+      { "name": "motorbike",    "red": 64,  "green": 128, "blue": 128 },
+      { "name": "person",       "red": 192, "green": 128, "blue": 128 },
+      { "name": "pottedplant",  "red": 0,   "green": 64,  "blue": 0   },
+      { "name": "sheep",        "red": 128, "green": 64,  "blue": 0   },
+      { "name": "sofa",         "red": 0,   "green": 192, "blue": 0   },
+      { "name": "train",        "red": 128, "green": 192, "blue": 0   },
+      { "name": "tvmonitor",    "red": 0,   "green": 64,  "blue": 128 }
+    ]
+  }
+}

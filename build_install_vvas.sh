@@ -113,7 +113,11 @@ echo "========================================="
 echo " Installing: vvas-examples configs"
 echo "========================================="
 cd "$BASEDIR/vvas-examples"
-$MESON build --prefix "$PREFIX"
+# Local embedded builds always package the MIPI camera examples. Yocto recipes
+# can continue to select the mipi-camera Meson option independently.
+examples_meson_args=("-Dmipi-camera=true")
+rm -rf build
+$MESON build --prefix "$PREFIX" "${examples_meson_args[@]}"
 cd build
 ninja
 DESTDIR="$BASEDIR/install" ninja install

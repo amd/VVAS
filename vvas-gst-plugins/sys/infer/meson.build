@@ -30,7 +30,8 @@ gstvvas_xinfer = library('gstvvas_xinfer', [ 'utils/vvas_memory_pool.c', 'utils/
   include_directories : [configinc, libsinc],
   dependencies : [gstvideo_dep, gst_dep, gstvvaspool_dep, gstvvasalloc_dep, dl_dep, jansson_dep,
                   gstallocators_dep, vvascore_dep, gstvvasutils_dep, gstvvasinfermeta_dep,
-                  math_dep, gstvvascoreutils_dep, vvasstructure_dep, ort_dep, vart_dep],
+                  math_dep, gstvvascoreutils_dep, vvasstructure_dep, ort_dep, vart_dep,
+                  gstvvaslogbridge_dep],
   install : true,
   install_dir : plugins_install_dir,
 )

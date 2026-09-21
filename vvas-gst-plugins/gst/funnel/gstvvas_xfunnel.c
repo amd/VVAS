@@ -32,6 +32,7 @@
 
 #include <gst/gst.h>
 #include <gst/vvas/gstvvassrcidmeta.h>
+#include <gst/vvas/gstvvaslogbridge.h>
 #include "gstvvas_xfunnel.h"
 
 /**
@@ -629,13 +630,15 @@ gst_vvas_xfunnel_src_query (GstPad *pad, GstObject *parent, GstQuery *query)
 static gboolean
 gst_vvas_xfunnel_src_event (GstPad *pad, GstObject *parent, GstEvent *event)
 {
-  /* Note: all upstream events are dropped because GstEvent does not carry a
-   * pad-index, so the funnel cannot route the event back to the originating
-   * sink pad. Supporting this requires extending the event metadata. */
-
-  GST_DEBUG_OBJECT (pad, "Dropping event %" GST_PTR_FORMAT, event);
+  /*
+   * A standard upstream GstEvent has no branch identity.  xfunnel cannot
+   * route it to one of its request sink pads, so branch-specific upstream
+   * event propagation is intentionally unsupported.
+   */
+  GST_WARNING_OBJECT (pad, "Unsupported upstream event %" GST_PTR_FORMAT,
+      event);
   gst_event_unref (event);
-  return TRUE;
+  return FALSE;
 }
 
 /**
@@ -1870,6 +1873,7 @@ gst_vvas_xfunnel_change_state (GstElement *element, GstStateChange transition)
 static gboolean
 vvas_xfunnel_plugin_init (GstPlugin *plugin)
 {
+  gst_vvas_log_bridge_install ();
   /* register vvas_xfunnel plugin */
   return gst_element_register (plugin, "vvas_xfunnel", GST_RANK_PRIMARY,
       GST_TYPE_VVAS_XFUNNEL);

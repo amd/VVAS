@@ -71,6 +71,7 @@
 #include "gstvvas_xmulticrop.h"
 
 #include <gst/vvas/gstvvascoreutils.h>
+#include <gst/vvas/gstvvaslogbridge.h>
 #include <vvas_core/vvas_context.h>
 #include <vvas_core/vvas_common.h>
 #include <vvas_core/vvas_image_process.h>
@@ -1678,6 +1679,7 @@ static gboolean
 gst_vvas_xmulticrop_sink_event (GstBaseTransform *trans, GstEvent *event)
 {
   GstVvasXMultiCrop *self = GST_VVAS_XMULTICROP (trans);
+  GST_VVAS_LOG_SCOPE (self);
   gboolean ret = TRUE;
 
   GST_DEBUG_OBJECT (self, "received %" GST_PTR_FORMAT, event);
@@ -2486,6 +2488,8 @@ vvas_xmulticrop_input_copy_thread (gpointer data)
 {
   GstVvasXMultiCrop *self = GST_VVAS_XMULTICROP (data);
   GstVvasXMultiCropPrivate *priv = self->priv;
+
+  gst_vvas_log_bridge_attach_thread (GST_OBJECT (self));
 
   while (1) {
     GstBuffer *inbuf = NULL;
@@ -3568,6 +3572,7 @@ gst_vvas_xmulticrop_generate_output (GstBaseTransform *trans,
     GstBuffer **outbuf)
 {
   GstVvasXMultiCrop *self = GST_VVAS_XMULTICROP (trans);
+  GST_VVAS_LOG_SCOPE (self);
   GstVvasXMultiCropPrivate *priv = self->priv;
   GstBuffer *inbuf = NULL;
   GstBuffer *cur_outbuf = NULL;
@@ -4376,6 +4381,7 @@ gst_vvas_xmulticrop_change_state (GstElement *element,
     GstStateChange transition)
 {
   GstVvasXMultiCrop *self = GST_VVAS_XMULTICROP (element);
+  GST_VVAS_LOG_SCOPE (self);
   GstVvasXMultiCropPrivate *priv = self->priv;
   GstStateChangeReturn ret;
 
@@ -4486,6 +4492,7 @@ gst_vvas_xmulticrop_change_state (GstElement *element,
 static gboolean
 vvas_xmulticrop_plugin_init (GstPlugin *plugin)
 {
+  gst_vvas_log_bridge_install ();
   /* Register vvas_xmulticrop plugin */
   return gst_element_register (plugin, "vvas_xmulticrop", GST_RANK_PRIMARY,
       GST_TYPE_VVAS_XMULTICROP);

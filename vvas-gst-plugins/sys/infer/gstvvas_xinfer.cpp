@@ -58,6 +58,7 @@
 #include "gstvvas_xinfer_helper.h"
 #include <vvas_core/vvas_video_priv.h>
 #include <vvas_core/vvas_memory_priv.h>
+#include <gst/vvas/gstvvaslogbridge.h>
 
 #include "gstvvas_xinfer.h"
 
@@ -221,21 +222,21 @@ struct _GstVvas_XInferPrivate
   /** internal input buffer pool */
   GstBufferPool *input_pool;
   /** Stop triggered on EOS or ctrl^c */
-  atomic<gboolean> stop;
+    atomic < gboolean > stop;
   /** Holds last status of pad_push, to be returned in generate_output */
-  atomic<GstFlowReturn> last_fret;
+    atomic < GstFlowReturn > last_fret;
   /** Sets on GST_EVENT_EOS */
-  atomic<gboolean> is_eos;
+    atomic < gboolean > is_eos;
   /** Sets on CUSTOM_PAD_EOS */
-  atomic<gboolean> is_pad_eos;
+    atomic < gboolean > is_pad_eos;
   /** Holds status on error conditions */
-  atomic<gboolean> is_error;
+    atomic < gboolean > is_error;
   /** Instance name of the element */
   gchar *instance_name;
 
-  std::unique_ptr<PreProcessInfo> pre_proc;
-  std::unique_ptr<InferInfo> infer;
-  std::unique_ptr<PostProcessInfo> post_proc;
+    std::unique_ptr < PreProcessInfo > pre_proc;
+    std::unique_ptr < InferInfo > infer;
+    std::unique_ptr < PostProcessInfo > post_proc;
 
   /** Inference core Log level */
   VvasLogLevel core_log_level;
@@ -259,14 +260,16 @@ struct _GstVvas_XInferPrivate
 static GstStaticPadTemplate sink_template = GST_STATIC_PAD_TEMPLATE ("sink",
     GST_PAD_SINK,
     GST_PAD_ALWAYS,
-    GST_STATIC_CAPS (GST_VIDEO_CAPS_MAKE (
-        "{NV12, BGR, RGB, BGRA, RGBA, RGBx, BGRx, "
-        "RGBX_BF16_C4, BGRx_BF16_C4, RGB_BF16, BGR_BF16, "
-        "RGB_BF16P, BGR_BF16P, "
-        "RGBX_FP16_C4, BGRx_FP16_C4, RGB_FP16, BGR_FP16, "
-        "RGB_FP16P, BGR_FP16P, "
-        "RGB_FLOAT, BGR_FLOAT, RGB_FLOATP, BGR_FLOATP, "
-        "GRAY_BF16, GRAY_FP16, GRAY_FLOAT}")));
+    GST_STATIC_CAPS (GST_VIDEO_CAPS_MAKE
+        ("{NV12, BGR, RGB, BGRA, RGBA, RGBx, BGRx, "
+            "RGBX_BF16_C4, BGRX_BF16_C4, RGBX_BF16_C8, "
+            "RGB_BF16, BGR_BF16, "
+            "RGB_BF16P, BGR_BF16P, "
+            "RGBX_FP16_C4, BGRX_FP16_C4, RGBX_FP16_C8, RGBX8_C8, "
+            "RGB_FP16, BGR_FP16, "
+            "RGB_FP16P, BGR_FP16P, "
+            "RGB_FLOAT, BGR_FLOAT, RGB_FLOATP, BGR_FLOATP, "
+            "GRAY_BF16, GRAY_FP16, GRAY_FLOAT}")));
 
 /**
  *  @var GstStaticPadTemplate src_template
@@ -275,14 +278,16 @@ static GstStaticPadTemplate sink_template = GST_STATIC_PAD_TEMPLATE ("sink",
 static GstStaticPadTemplate src_template = GST_STATIC_PAD_TEMPLATE ("src",
     GST_PAD_SRC,
     GST_PAD_ALWAYS,
-    GST_STATIC_CAPS (GST_VIDEO_CAPS_MAKE (
-        "{NV12, BGR, RGB, BGRA, RGBA, RGBx, BGRx, "
-        "RGBX_BF16_C4, BGRx_BF16_C4, RGB_BF16, BGR_BF16, "
-        "RGB_BF16P, BGR_BF16P, "
-        "RGBX_FP16_C4, BGRx_FP16_C4, RGB_FP16, BGR_FP16, "
-        "RGB_FP16P, BGR_FP16P, "
-        "RGB_FLOAT, BGR_FLOAT, RGB_FLOATP, BGR_FLOATP, "
-        "GRAY_BF16, GRAY_FP16, GRAY_FLOAT}")));
+    GST_STATIC_CAPS (GST_VIDEO_CAPS_MAKE
+        ("{NV12, BGR, RGB, BGRA, RGBA, RGBx, BGRx, "
+            "RGBX_BF16_C4, BGRX_BF16_C4, RGBX_BF16_C8, "
+            "RGB_BF16, BGR_BF16, "
+            "RGB_BF16P, BGR_BF16P, "
+            "RGBX_FP16_C4, BGRX_FP16_C4, RGBX_FP16_C8, RGBX8_C8, "
+            "RGB_FP16, BGR_FP16, "
+            "RGB_FP16P, BGR_FP16P, "
+            "RGB_FLOAT, BGR_FLOAT, RGB_FLOATP, BGR_FLOATP, "
+            "GRAY_BF16, GRAY_FP16, GRAY_FLOAT}")));
 
 #define gst_vvas_xinfer_parent_class parent_class
 
@@ -327,13 +332,13 @@ vvas_format_to_caps_str (VvasVideoFormat fmt)
  * @brief This function will check if class string entry is of present in input_class_filters.
  */
 static gboolean
-is_class_allowed (GstVvas_XInferPrivate * priv, const gchar * class_str)
+is_class_allowed (GstVvas_XInferPrivate *priv, const gchar *class_str)
 {
   if (!priv->infer->input_class_filters)
     return TRUE;
 
-  if (g_list_find_custom (priv->infer->input_class_filters, (gconstpointer) class_str,
-          (GCompareFunc) g_strcmp0)) {
+  if (g_list_find_custom (priv->infer->input_class_filters,
+          (gconstpointer) class_str, (GCompareFunc) g_strcmp0)) {
     return TRUE;
   }
 
@@ -350,7 +355,7 @@ is_class_allowed (GstVvas_XInferPrivate * priv, const gchar * class_str)
  * @brief This function will check if node is of allowed class or not.
  */
 static gboolean
-check_filter_label_at_node (GNode * node, gpointer data)
+check_filter_label_at_node (GNode *node, gpointer data)
 {
   gboolean ret = FALSE;
   GstVvas_XInfer *self = (GstVvas_XInfer *) data;
@@ -393,7 +398,7 @@ check_filter_label_at_node (GNode * node, gpointer data)
  *        current level of prediction
  */
 static gboolean
-check_bbox_buffers_availability (GNode * node, gpointer data)
+check_bbox_buffers_availability (GNode *node, gpointer data)
 {
   Vvas_XInferNumSubs *pNumSubs = (Vvas_XInferNumSubs *) data;
   GstVvas_XInfer *self = pNumSubs->self;
@@ -485,7 +490,7 @@ check_bbox_buffers_availability (GNode * node, gpointer data)
  *        queue
  */
 static gboolean
-prepare_inference_sub_buffers (GNode * node, gpointer data)
+prepare_inference_sub_buffers (GNode *node, gpointer data)
 {
   /* Previous infer has meta i.e found something */
   Vvas_XInferNumSubs *numSubs = (Vvas_XInferNumSubs *) data;
@@ -508,9 +513,9 @@ prepare_inference_sub_buffers (GNode * node, gpointer data)
     return FALSE;
   }
 
-  if ( g_node_child_position (node->parent,node) >= MAX_ROI) {
+  if (g_node_child_position (node->parent, node) >= MAX_ROI) {
     GST_DEBUG_OBJECT (self, "Sub buffers reached to max ROI "
-          "supported by preprocessor i.e. %d", MAX_ROI);
+        "supported by preprocessor i.e. %d", MAX_ROI);
     return TRUE;
   }
   prediction = (GstInferencePrediction *) node->data;
@@ -571,7 +576,8 @@ prepare_inference_sub_buffers (GNode * node, gpointer data)
           (GstInferencePrediction *) node->parent->data;
 
       GST_DEBUG_OBJECT (self, "queueing subbuffer %p", prediction->sub_buffer);
-      g_queue_push_tail (self->priv->infer->sub_buffers, prediction->sub_buffer);
+      g_queue_push_tail (self->priv->infer->sub_buffers,
+          prediction->sub_buffer);
 
       sub_meta =
           ((GstInferenceMeta *) gst_buffer_get_meta (prediction->sub_buffer,
@@ -589,12 +595,12 @@ prepare_inference_sub_buffers (GNode * node, gpointer data)
       gst_inference_prediction_ref (parent_prediction);
       sub_meta->prediction = prediction;
       numSubs->available_buffer++;
-      priv->pre_proc->frame->is_ppe_required[g_node_child_position (node->parent,
-              node)] = FALSE;
+      priv->pre_proc->frame->
+          is_ppe_required[g_node_child_position (node->parent, node)] = FALSE;
     } else {
       numSubs->required_buffer++;
-      priv->pre_proc->frame->is_ppe_required[g_node_child_position (node->parent,
-              node)] = TRUE;
+      priv->pre_proc->frame->
+          is_ppe_required[g_node_child_position (node->parent, node)] = TRUE;
     }
   }
 
@@ -612,7 +618,7 @@ prepare_inference_sub_buffers (GNode * node, gpointer data)
  * @brief This function prints node
  */
 static gboolean
-printf_all_nodes (GNode * node, gpointer data)
+printf_all_nodes (GNode *node, gpointer data)
 {
   GstVvas_XInfer *self = GST_VVAS_XINFER (data);
 
@@ -634,7 +640,7 @@ printf_all_nodes (GNode * node, gpointer data)
  *        inference level
  */
 static gboolean
-prepare_ppe_outbuf_at_level (GNode * node, gpointer data)
+prepare_ppe_outbuf_at_level (GNode *node, gpointer data)
 {
   GstVvas_XInfer *self = GST_VVAS_XINFER (data);
   GstVvas_XInferPrivate *priv = self->priv;
@@ -682,8 +688,8 @@ prepare_ppe_outbuf_at_level (GNode * node, gpointer data)
       return FALSE;
     }
 
-    if (!priv->pre_proc->frame->is_ppe_required[g_node_child_position (node->parent,
-                node)]) {
+    if (!priv->pre_proc->frame->
+        is_ppe_required[g_node_child_position (node->parent, node)]) {
       GST_DEBUG_OBJECT (self,
           "Skipping inference on this node as scalinfg is not required");
       return FALSE;
@@ -714,7 +720,8 @@ prepare_ppe_outbuf_at_level (GNode * node, gpointer data)
         priv->infer->level);
 
     /* acquire ppe output buffer */
-    fret = gst_buffer_pool_acquire_buffer (priv->pre_proc->outpool, &outbuf, NULL);
+    fret =
+        gst_buffer_pool_acquire_buffer (priv->pre_proc->outpool, &outbuf, NULL);
     if (fret != GST_FLOW_OK) {
       GST_ERROR_OBJECT (self, "failed to allocate buffer from pool %p",
           priv->pre_proc->outpool);
@@ -724,8 +731,8 @@ prepare_ppe_outbuf_at_level (GNode * node, gpointer data)
 
     /* copy GstVvasUsrMeta if any */
     gst_usrmeta =
-        gst_buffer_get_vvas_usr_meta ((GstBuffer *) priv->
-        pre_proc->frame->parent_buf);
+        gst_buffer_get_vvas_usr_meta ((GstBuffer *) priv->pre_proc->
+        frame->parent_buf);
     if (gst_usrmeta) {
       info = (GstMetaInfo *) ((GstMeta *) gst_usrmeta)->info;
       if (info && info->transform_func) {
@@ -737,8 +744,8 @@ prepare_ppe_outbuf_at_level (GNode * node, gpointer data)
 
     /* Prepare VvasVideoFrame from GstBuffer required by core for pre-processing */
     bret =
-        vvas_xinfer_prepare_ppe_output_frame (self, outbuf, priv->pre_proc->out_vinfo,
-        &out_vvas_frame);
+        vvas_xinfer_prepare_ppe_output_frame (self, outbuf,
+        priv->pre_proc->out_vinfo, &out_vvas_frame);
     if (!bret) {
       priv->is_error = TRUE;
       vvas_video_frame_free (out_vvas_frame);
@@ -762,19 +769,20 @@ prepare_ppe_outbuf_at_level (GNode * node, gpointer data)
     infer_meta->prediction = prediction;
 
     if (priv->infer->attach_ppebuf) {
-      if (prediction->sub_buffer){
+      if (prediction->sub_buffer) {
         GST_DEBUG_OBJECT (self,
-          "removing existing sub_buffer %p", prediction->sub_buffer);
+            "removing existing sub_buffer %p", prediction->sub_buffer);
         gst_buffer_unref (prediction->sub_buffer);
       }
       prediction->sub_buffer = gst_buffer_ref (outbuf);
       GST_DEBUG_OBJECT (self,
-        "acquired PPE output buffer %p and attached as sub_buffer", outbuf);
+          "acquired PPE output buffer %p and attached as sub_buffer", outbuf);
     }
 
     /* Add out_vvas_frame to array of ppe kernel output frame.
      * The ppe kenel would fill buffer in this frame with output data */
-    priv->pre_proc->core_handle->output[priv->pre_proc->nframes_in_level] = out_vvas_frame;
+    priv->pre_proc->core_handle->output[priv->pre_proc->nframes_in_level] =
+        out_vvas_frame;
     g_queue_push_tail (priv->pre_proc->buf_queue, outbuf);
     priv->pre_proc->nframes_in_level++;
   }
@@ -793,7 +801,7 @@ prepare_ppe_outbuf_at_level (GNode * node, gpointer data)
  *        parameters
  */
 static gboolean
-vvas_xinfer_is_sub_buffer_useful (GstVvas_XInfer * self, GstBuffer * buf)
+vvas_xinfer_is_sub_buffer_useful (GstVvas_XInfer *self, GstBuffer *buf)
 {
   GstVideoMeta *vmeta = NULL;
 
@@ -830,8 +838,8 @@ vvas_xinfer_is_sub_buffer_useful (GstVvas_XInfer * self, GstBuffer * buf)
  *        infer-only HW-tensor path.
  */
 static gboolean
-vvas_xinfer_allocate_sink_internal_pool (GstVvas_XInfer * self,
-    gint dev_idx, gchar * xclbin_loc, gint mem_bank, guint stride_align)
+vvas_xinfer_allocate_sink_internal_pool (GstVvas_XInfer *self,
+    gint dev_idx, gchar *xclbin_loc, gint mem_bank, guint stride_align)
 {
   GstVideoInfo info;
   GstBufferPool *pool = NULL;
@@ -850,11 +858,13 @@ vvas_xinfer_allocate_sink_internal_pool (GstVvas_XInfer * self,
     return FALSE;
   }
   pool = gst_vvas_buffer_pool_new (stride_align ? stride_align : 1, 1);
-  GST_LOG_OBJECT (self, "allocated internal sink pool %p (dev=%d bank=%d stride_align=%u)",
-      pool, dev_idx, mem_bank, stride_align);
+  GST_LOG_OBJECT (self,
+      "allocated internal sink pool %p (dev=%d bank=%d stride_align=%u)", pool,
+      dev_idx, mem_bank, stride_align);
 
   /* Create new allocator */
-  allocator = gst_vvas_allocator_new (dev_idx, xclbin_loc, USE_DMABUF, mem_bank);
+  allocator =
+      gst_vvas_allocator_new (dev_idx, xclbin_loc, USE_DMABUF, mem_bank);
 
   /* kernel need physically contiguous memory */
   gst_allocation_params_init (&alloc_params);
@@ -924,8 +934,8 @@ error:
  *        available
  */
 static gboolean
-vvas_xinfer_copy_input_buffer (GstVvas_XInfer * self, GstBuffer * inbuf,
-    GstBuffer ** internal_inbuf, gint dev_idx, gchar * xclbin_loc,
+vvas_xinfer_copy_input_buffer (GstVvas_XInfer *self, GstBuffer *inbuf,
+    GstBuffer **internal_inbuf, gint dev_idx, gchar *xclbin_loc,
     gint mem_bank, guint stride_align)
 {
   GstBuffer *new_inbuf = NULL;
@@ -1021,9 +1031,9 @@ error:
  * @return TRUE on success, FALSE on error.
  */
 static gboolean
-vvas_xinfer_ensure_xrt_input_buffer (GstVvas_XInfer * self, GstBuffer * inbuf,
-    gint dev_idx, gchar * xclbin_loc, gint mem_bank, guint stride_align,
-    GstBuffer ** new_inbuf)
+vvas_xinfer_ensure_xrt_input_buffer (GstVvas_XInfer *self, GstBuffer *inbuf,
+    gint dev_idx, gchar *xclbin_loc, gint mem_bank, guint stride_align,
+    GstBuffer **new_inbuf)
 {
   GstMemory *in_mem;
   gboolean need_copy;
@@ -1110,7 +1120,7 @@ vvas_xinfer_ensure_xrt_input_buffer (GstVvas_XInfer * self, GstBuffer * inbuf,
  *
  */
 static gboolean
-vvas_xinfer_ppe_init (GstVvas_XInfer * self)
+vvas_xinfer_ppe_init (GstVvas_XInfer *self)
 {
   GstVvas_XInferPrivate *priv = self->priv;
   VvasImageProcess *ppe_handle = NULL;
@@ -1119,9 +1129,11 @@ vvas_xinfer_ppe_init (GstVvas_XInfer * self)
   bool flag = FALSE;
 
   GST_DEBUG_OBJECT (self, "Query Image Process Library caps");
-  lib_caps = vvas_image_process_get_capabilities (priv->pre_proc->core_handle->name);
+  lib_caps =
+      vvas_image_process_get_capabilities (priv->pre_proc->core_handle->name);
   if (!lib_caps) {
-    GST_ERROR_OBJECT (self, "Failed to query Image Process Library caps for library: %s."
+    GST_ERROR_OBJECT (self,
+        "Failed to query Image Process Library caps for library: %s."
         " Check library-name in preprocess-config",
         priv->pre_proc->core_handle->name);
     return FALSE;
@@ -1155,8 +1167,8 @@ vvas_xinfer_ppe_init (GstVvas_XInfer * self)
   if (!priv->pre_proc->use_software) {
     GST_DEBUG_OBJECT (self, "Creating vvas_context");
     priv->pre_proc->vvas_ctx =
-        vvas_context_create (priv->pre_proc->dev_idx, priv->pre_proc->xclbin_loc,
-        priv->core_log_level, &vret);
+        vvas_context_create (priv->pre_proc->dev_idx,
+        priv->pre_proc->xclbin_loc, priv->core_log_level, &vret);
   } else {
     /* For Software Scaling, no need of device index and XCLBIN */
     priv->pre_proc->vvas_ctx =
@@ -1165,7 +1177,8 @@ vvas_xinfer_ppe_init (GstVvas_XInfer * self)
   if (!priv->pre_proc->vvas_ctx) {
     if (!priv->pre_proc->use_software &&
         !g_file_test (priv->pre_proc->xclbin_loc, G_FILE_TEST_EXISTS)) {
-      GST_ERROR_OBJECT (self, "Couldn't create VVAS context: xclbin %s not found",
+      GST_ERROR_OBJECT (self,
+          "Couldn't create VVAS context: xclbin %s not found",
           priv->pre_proc->xclbin_loc);
     } else {
       GST_ERROR_OBJECT (self, "Couldn't create VVAS context");
@@ -1185,7 +1198,8 @@ vvas_xinfer_ppe_init (GstVvas_XInfer * self)
       (const char *) priv->pre_proc->core_handle->name, priv->core_log_level,
       &priv->pre_proc->init_config, &priv->pre_proc->out_param);
   if (!ppe_handle) {
-    GST_ERROR_OBJECT (self, "Couldn't create Image Process instance for library: %s."
+    GST_ERROR_OBJECT (self,
+        "Couldn't create Image Process instance for library: %s."
         " Possible invalid or missing library-config in preprocess-config",
         priv->pre_proc->core_handle->name);
     return FALSE;
@@ -1222,7 +1236,8 @@ vvas_xinfer_ppe_init (GstVvas_XInfer * self)
 
   GST_DEBUG_OBJECT (self,
       "Image Process Library alignment requirements: x[%u], width[%u] stride[%u]",
-      priv->pre_proc->caps->alignment_req.x, priv->pre_proc->caps->alignment_req.width,
+      priv->pre_proc->caps->alignment_req.x,
+      priv->pre_proc->caps->alignment_req.width,
       priv->pre_proc->caps->alignment_req.stride);
 
   GST_INFO_OBJECT (self,
@@ -1246,14 +1261,14 @@ vvas_xinfer_ppe_init (GstVvas_XInfer * self)
  *
  */
 static gboolean
-vvas_xinfer_postproc_init (GstVvas_XInfer * self)
+vvas_xinfer_postproc_init (GstVvas_XInfer *self)
 {
   GstVvas_XInferPrivate *priv = self->priv;
   VvasTensorInfo *t_info[MAX_TENSORS] = { };
   VvasReturnType vret = VVAS_RET_ERROR;
 
   int dev_idx = -1;
-  if(priv->infer->vart_info.out_tensor_type == vart::TensorType::HW) {
+  if (priv->infer->vart_info.out_tensor_type == vart::TensorType::HW) {
     dev_idx = XDNA_DEVICE_IDX;
   }
 
@@ -1275,9 +1290,10 @@ vvas_xinfer_postproc_init (GstVvas_XInfer * self)
     GST_INFO_OBJECT (self, "Post-process initialization time: %lu us",
         priv->infer_profiler.post_proc.init_us);
   }
-  
+
   size_t num_tensors = 0;
-  if (strstr (priv->post_proc->library_path, "libvvascore_postprocess_vart") != NULL) {
+  if (strstr (priv->post_proc->library_path,
+          "libvvascore_postprocess_vart") != NULL) {
     num_tensors = priv->infer->model_config.num_in_tensors;
     for (size_t i = 0; i < num_tensors; i++) {
       t_info[i] = &priv->infer->model_config.in_tensors[i];
@@ -1287,7 +1303,7 @@ vvas_xinfer_postproc_init (GstVvas_XInfer * self)
   for (size_t j = 0; j < priv->infer->model_config.num_out_tensors; j++) {
     t_info[num_tensors + j] = &priv->infer->model_config.out_tensors[j];
   }
-  
+
   num_tensors += priv->infer->model_config.num_out_tensors;
   priv->post_proc->handle =
       vvas_postprocess_create (priv->post_proc->json_string,
@@ -1295,7 +1311,8 @@ vvas_xinfer_postproc_init (GstVvas_XInfer * self)
       priv->infer->model_config.batch_size, priv->core_log_level);
   if (!priv->post_proc->handle) {
     if (!g_file_test (priv->post_proc->library_path, G_FILE_TEST_EXISTS)) {
-      GST_ERROR_OBJECT (self, "vvas_postprocess_create failed: %s file not found",
+      GST_ERROR_OBJECT (self,
+          "vvas_postprocess_create failed: %s file not found",
           priv->post_proc->library_path);
     } else {
       GST_ERROR_OBJECT (self, "vvas_postprocess_create failed");
@@ -1304,7 +1321,7 @@ vvas_xinfer_postproc_init (GstVvas_XInfer * self)
   }
 
   /* Create Memory pool for tensor data */
-  std::vector<size_t> sizes = {};
+  std::vector < size_t >sizes = { };
 
   for (guint i = 0; i < priv->infer->model_config.num_out_tensors; i++) {
     sizes.push_back (priv->infer->model_config.out_tensors[i].size);
@@ -1314,11 +1331,13 @@ vvas_xinfer_postproc_init (GstVvas_XInfer * self)
    * Assuming infer->max_queue = batch_size, then 1 batch infer is processing,
    * 1 batch is in Post Process Queue and 1 batch Post Process thread is processing.
    */
-  VvasAllocationType mem_type = priv->infer->vart_info.out_tensor_type == vart::TensorType::HW ?
-                VVAS_ALLOC_TYPE_CMA : VVAS_ALLOC_TYPE_NON_CMA;
-  priv->post_proc->tensor_pool = new VvasTensorPool (priv->post_proc->vvas_ctx,
-                                   TENSOR_POOL_SIZE_MULTIPLIER * priv->infer->max_queue,
-                                   mem_type, VVAS_ALLOC_FLAG_NONE, priv->infer->vart_info.mbank_idx, sizes);
+  VvasAllocationType mem_type =
+      priv->infer->vart_info.out_tensor_type ==
+      vart::TensorType::HW ? VVAS_ALLOC_TYPE_CMA : VVAS_ALLOC_TYPE_NON_CMA;
+  priv->post_proc->tensor_pool =
+      new VvasTensorPool (priv->post_proc->vvas_ctx,
+      TENSOR_POOL_SIZE_MULTIPLIER * priv->infer->max_queue, mem_type,
+      VVAS_ALLOC_FLAG_NONE, priv->infer->vart_info.mbank_idx, sizes);
 
   GST_DEBUG_OBJECT (self, "Post-Process created successfully");
 
@@ -1332,20 +1351,23 @@ vvas_xinfer_postproc_init (GstVvas_XInfer * self)
  *
  * @brief This function returns the size of tensor in bytes
  */
-static size_t get_tensor_size_in_bytes(ONNXTensorElementDataType element_type,
-   const std::vector<int64_t> shape) {
-  auto element_count = std::accumulate(shape.begin(), shape.end(), 1, std::multiplies<int64_t>());
+static size_t
+get_tensor_size_in_bytes (ONNXTensorElementDataType element_type,
+    const std::vector < int64_t > shape)
+{
+  auto element_count = std::accumulate (shape.begin (), shape.end (), 1,
+      std::multiplies < int64_t > ());
   size_t size = element_count;
 
   switch (element_type) {
     case ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT:
-      size = element_count * sizeof(float);
+      size = element_count * sizeof (float);
       break;
     case ONNX_TENSOR_ELEMENT_DATA_TYPE_INT8:
-      size = element_count * sizeof(int8_t);
+      size = element_count * sizeof (int8_t);
       break;
     case ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16:
-      size = element_count * sizeof(uint16_t);
+      size = element_count * sizeof (uint16_t);
       break;
     default:
       break;
@@ -1361,7 +1383,8 @@ static size_t get_tensor_size_in_bytes(ONNXTensorElementDataType element_type,
  * @brief This function returns the ONNXTensorElementDataType for the given VvasTensorDataType
  */
 static ONNXTensorElementDataType
-get_ort_tensor_data_type (VvasTensorDataType data_type) {
+get_ort_tensor_data_type (VvasTensorDataType data_type)
+{
   switch (data_type) {
     case VVAS_TENSOR_DATA_TYPE_FLOAT32:
       return ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT;
@@ -1383,9 +1406,10 @@ get_ort_tensor_data_type (VvasTensorDataType data_type) {
  * @brief This function returns the VvasTensorDataType for the given Ort tensor type
  */
 static VvasTensorDataType
-get_vvas_tensor_data_type (Ort::ConstTensorTypeAndShapeInfo ort_tensor_info) {
+get_vvas_tensor_data_type (Ort::ConstTensorTypeAndShapeInfo ort_tensor_info)
+{
   VvasTensorDataType vvas_data_type = VVAS_TENSOR_DATA_TYPE_UNKNOWN;
-  auto element_type = ort_tensor_info.GetElementType();
+  auto element_type = ort_tensor_info.GetElementType ();
 
   switch (element_type) {
     case ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT:
@@ -1411,7 +1435,8 @@ get_vvas_tensor_data_type (Ort::ConstTensorTypeAndShapeInfo ort_tensor_info) {
  * @brief This function returns the VvasTensorDataType for the given vart::Datatype
  */
 static VvasTensorDataType
-get_vvas_tensor_data_type (vart::DataType dt) {
+get_vvas_tensor_data_type (vart::DataType dt)
+{
   VvasTensorDataType vvas_data_type = VVAS_TENSOR_DATA_TYPE_UNKNOWN;
 
   switch (dt) {
@@ -1433,20 +1458,48 @@ get_vvas_tensor_data_type (vart::DataType dt) {
   return vvas_data_type;
 }
 
+static void
+vvas_xinfer_set_tensor_memory_layout (VvasTensorInfo * tensor, const char *layout)
+{
+  if (tensor->memory_layout) {
+    g_free (tensor->memory_layout);
+    tensor->memory_layout = NULL;
+  }
+  if (layout && layout[0] != '\0')
+    tensor->memory_layout = g_strdup (layout);
+}
+
+static void
+vvas_xinfer_free_tensor_info (VvasTensorInfo * tensor)
+{
+  if (tensor->name) {
+    g_free (tensor->name);
+    tensor->name = NULL;
+  }
+  if (tensor->memory_layout) {
+    g_free (tensor->memory_layout);
+    tensor->memory_layout = NULL;
+  }
+}
+
 static gboolean
-priv_fill_model_config_vart (GstVvas_XInfer * self)
+priv_fill_model_config_vart (GstVvas_XInfer *self)
 {
   GstVvas_XInferPrivate *priv = self->priv;
-  const std::vector<vart::NpuTensorInfo> input_tensors_info =
-      priv->infer->vart_info.runner->get_tensors_info (vart::TensorDirection::INPUT,
-          priv->infer->vart_info.inp_tensor_type);
-  const std::vector<vart::NpuTensorInfo> output_tensors_info =
-      priv->infer->vart_info.runner->get_tensors_info (vart::TensorDirection::OUTPUT,
-          priv->infer->vart_info.out_tensor_type);
-  size_t batch_size = priv->infer->vart_info.runner->get_batch_size();
+  const std::vector < vart::NpuTensorInfo > input_tensors_info =
+      priv->infer->vart_info.
+      runner->get_tensors_info (vart::TensorDirection::INPUT,
+      priv->infer->vart_info.inp_tensor_type);
+  const std::vector < vart::NpuTensorInfo > output_tensors_info =
+      priv->infer->vart_info.
+      runner->get_tensors_info (vart::TensorDirection::OUTPUT,
+      priv->infer->vart_info.out_tensor_type);
+  size_t batch_size = priv->infer->vart_info.runner->get_batch_size ();
 
-  priv->infer->model_config.num_in_tensors = priv->infer->vart_info.runner->get_num_input_tensors ();
-  priv->infer->model_config.num_out_tensors = priv->infer->vart_info.runner->get_num_output_tensors ();
+  priv->infer->model_config.num_in_tensors =
+      priv->infer->vart_info.runner->get_num_input_tensors ();
+  priv->infer->model_config.num_out_tensors =
+      priv->infer->vart_info.runner->get_num_output_tensors ();
 
   GST_DEBUG_OBJECT (self, "Number of input tensors: %lu, "
       "Number of output tensors: %lu", priv->infer->model_config.num_in_tensors,
@@ -1455,72 +1508,110 @@ priv_fill_model_config_vart (GstVvas_XInfer * self)
   /* Validate the number of input tensors, as per assumption */
   if (priv->infer->model_config.num_in_tensors != 1) {
     GST_ERROR_OBJECT (self,
-      "Only single input tensor models are supported. Current model has %lu input tensors.",
-      priv->infer->model_config.num_in_tensors);
+        "Only single input tensor models are supported. Current model has %lu input tensors.",
+        priv->infer->model_config.num_in_tensors);
     return FALSE;
   }
 
   for (size_t i = 0; i < priv->infer->model_config.num_in_tensors; i++) {
-    priv->infer->model_config.in_tensors[i].name = g_strdup (input_tensors_info[i].name.c_str());
-    priv->infer->model_config.input_names.push_back(priv->infer->model_config.in_tensors[i].name);
-    priv->infer->model_config.in_tensors[i].direction = VVAS_TENSOR_DATA_DIRECTION_INPUT;
+    priv->infer->model_config.in_tensors[i].name =
+        g_strdup (input_tensors_info[i].name.c_str ());
+    priv->infer->model_config.input_names.push_back (priv->infer->
+        model_config.in_tensors[i].name);
+    priv->infer->model_config.in_tensors[i].direction =
+        VVAS_TENSOR_DATA_DIRECTION_INPUT;
     /* vart::nputensor stores shapes as a vector of uint32_t's but model_config.input_shapes is
-     a vector of int64_t's.
-    Need to cast each element to int64_t to push into model_config.input_shapes; */
-    std::vector<int64_t> tmp_shape;
-    std::transform (input_tensors_info[i].shape.begin (), input_tensors_info[i].shape.end (),
-                    std::back_inserter (tmp_shape),
-                     [](uint32_t val){ return static_cast<int64_t>(val); });
-    priv->infer->model_config.input_shapes.push_back(std::move (tmp_shape));
+       a vector of int64_t's.
+       Need to cast each element to int64_t to push into model_config.input_shapes; */
+    std::vector < int64_t > tmp_shape;
+    std::transform (input_tensors_info[i].shape.begin (),
+        input_tensors_info[i].shape.end (), std::back_inserter (tmp_shape),
+        [](uint32_t val) {
+        return static_cast < int64_t > (val);}
+    );
+    priv->infer->model_config.input_shapes.push_back (std::move (tmp_shape));
 
-    size_t shape_size = std::min (priv->infer->model_config.input_shapes.back().size(),
-        static_cast<size_t> (MAX_SHAPE_SIZE));
+    size_t shape_size =
+        std::min (priv->infer->model_config.input_shapes.back ().size (),
+        static_cast < size_t >(MAX_SHAPE_SIZE));
 
     priv->infer->model_config.in_tensors[i].valid_shapes = shape_size;
     for (size_t j = 0; j < shape_size; ++j) {
-        int64_t dim = priv->infer->model_config.input_shapes.back()[j];
-        if (dim < 0) {
-            GST_DEBUG_OBJECT(self, "Negative dimension (%" G_GINT64_FORMAT
-                ") in input_shape[%zu], setting to 0", dim, j);
-            priv->infer->model_config.dynamic_shape = TRUE;
-            priv->infer->model_config.in_tensors[i].shape[j] = 0;
-        } else {
-            priv->infer->model_config.in_tensors[i].shape[j] = static_cast<uint32_t>(dim);
-        }
+      int64_t dim = priv->infer->model_config.input_shapes.back ()[j];
+      if (dim < 0) {
+        GST_DEBUG_OBJECT (self, "Negative dimension (%" G_GINT64_FORMAT
+            ") in input_shape[%zu], setting to 0", dim, j);
+        priv->infer->model_config.dynamic_shape = TRUE;
+        priv->infer->model_config.in_tensors[i].shape[j] = 0;
+      } else {
+        priv->infer->model_config.in_tensors[i].shape[j] =
+            static_cast < uint32_t > (dim);
+      }
     }
-    priv->infer->model_config.in_tensors[i].size = input_tensors_info[i].size_in_bytes;
-    priv->infer->model_config.in_tensors[i].data_type = get_vvas_tensor_data_type(input_tensors_info[i].data_type);
-    auto quant = priv->infer->vart_info.runner->get_quant_parameters(input_tensors_info[i].name);
-    GST_DEBUG_OBJECT(self, "Input tensor[%zu] name: %s, scale: %f",
-        i, priv->infer->model_config.in_tensors[i].name,
-        quant.scale);
+    priv->infer->model_config.in_tensors[i].size =
+        input_tensors_info[i].size_in_bytes;
+    priv->infer->model_config.in_tensors[i].data_type =
+        get_vvas_tensor_data_type (input_tensors_info[i].data_type);
+    auto quant =
+        priv->infer->vart_info.
+        runner->get_quant_parameters (input_tensors_info[i].name);
+    GST_DEBUG_OBJECT (self, "Input tensor[%zu] name: %s, scale: %f", i,
+        priv->infer->model_config.in_tensors[i].name, quant.scale);
     if (priv->pre_proc->enabled && priv->pre_proc->is_quant_set) {
-      priv->infer->model_config.in_tensors[i].scale_coeff = (1.0f / priv->pre_proc->quant_data.scale_factor);
-    } else if (is_valid_positive_scale(quant.scale)) {
-      priv->infer->model_config.in_tensors[i].scale_coeff = (1.0f / quant.scale);
+      priv->infer->model_config.in_tensors[i].scale_coeff =
+          (1.0f / priv->pre_proc->quant_data.scale_factor);
+    } else if (is_valid_positive_scale (quant.scale)) {
+      priv->infer->model_config.in_tensors[i].scale_coeff =
+          (1.0f / quant.scale);
     } else {
       priv->infer->model_config.in_tensors[i].scale_coeff = DEFAULT_QT_FCTR;
     }
   }
 
-  /* Set batch size, model height, and model width based on input tensor layout*/
-  if (input_tensors_info[0].memory_layout == vart::MemoryLayout::NCHW) {
-    priv->infer->model_config.batch_size = static_cast<uint32_t>(batch_size);
+  /* Set batch size, model height, and model width based on input tensor layout.
+   * GENERIC layouts are resolved from 4D shape heuristics so HW/SW preprocessing
+   * can pick a concrete video format (NCHW/NHWC). */
+  vart::MemoryLayout effective_layout = input_tensors_info[0].memory_layout;
+  priv->infer->model_config.batch_size = static_cast<uint32_t>(batch_size);
+
+  if (effective_layout == vart::MemoryLayout::GENERIC) {
+    std::string generic_reason;
+    uint32_t inferred_width = 0;
+    uint32_t inferred_height = 0;
+
+    if (!infer_generic_preprocess_layout (input_tensors_info[0], effective_layout,
+            inferred_width, inferred_height, generic_reason)) {
+      GST_ERROR_OBJECT (self, "GENERIC layout inference failed: %s",
+          generic_reason.c_str ());
+      goto vart_error_free_in_tensors;
+    }
+
+    priv->infer->model_config.model_width = inferred_width;
+    priv->infer->model_config.model_height = inferred_height;
+    GST_INFO_OBJECT (self,
+        "GENERIC input layout inferred as %s (%ux%u) for PPE",
+        vart::to_string (effective_layout).data (), inferred_width, inferred_height);
+  } else if (effective_layout == vart::MemoryLayout::NCHW) {
     priv->infer->model_config.model_height = priv->infer->model_config.in_tensors[0].shape[2];
     priv->infer->model_config.model_width = priv->infer->model_config.in_tensors[0].shape[3];
-  } else if (input_tensors_info[0].memory_layout == vart::MemoryLayout::NHWC) {
-    priv->infer->model_config.batch_size = static_cast<uint32_t>(batch_size);
+  } else if (effective_layout == vart::MemoryLayout::NHWC) {
     priv->infer->model_config.model_height = priv->infer->model_config.in_tensors[0].shape[1];
     priv->infer->model_config.model_width = priv->infer->model_config.in_tensors[0].shape[2];
-  } else if (input_tensors_info[0].memory_layout == vart::MemoryLayout::HCWNC4) {
-      priv->infer->model_config.batch_size = static_cast<uint32_t>(batch_size);
-      priv->infer->model_config.model_height = priv->infer->model_config.in_tensors[0].shape[0];
-      priv->infer->model_config.model_width = priv->infer->model_config.in_tensors[0].shape[2];
+  } else if (effective_layout == vart::MemoryLayout::HCWNC4 ||
+      effective_layout == vart::MemoryLayout::HCWNC8) {
+    priv->infer->model_config.model_height = priv->infer->model_config.in_tensors[0].shape[0];
+    priv->infer->model_config.model_width = priv->infer->model_config.in_tensors[0].shape[2];
   } else {
     GST_ERROR_OBJECT(self, "Unknown input tensor layout: %d",
-        static_cast<int>(input_tensors_info[0].memory_layout));
+        static_cast<int>(effective_layout));
     goto vart_error_free_in_tensors;
   }
+
+  /* Use resolved effective_layout so postprocess gets NCHW/NHWC/HCWNC4, not GENERIC. */
+  vvas_xinfer_set_tensor_memory_layout (&priv->infer->model_config.in_tensors[0],
+      vart::to_string (effective_layout).data ());
+  GST_DEBUG_OBJECT (self, "Input tensor[0] memory_layout: %s",
+      priv->infer->model_config.in_tensors[0].memory_layout);
 
   if (priv->infer->model_config.num_out_tensors > MAX_TENSORS) {
     GST_ERROR_OBJECT (self,
@@ -1529,49 +1620,65 @@ priv_fill_model_config_vart (GstVvas_XInfer * self)
     goto vart_error_free_in_tensors;
   }
 
-  if (priv->post_proc->enabled && !priv->post_proc->dequant_data.empty() &&
-      priv->post_proc->dequant_data.size() != priv->infer->model_config.num_out_tensors) {
+  if (priv->post_proc->enabled && !priv->post_proc->dequant_data.empty () &&
+      priv->post_proc->dequant_data.size () !=
+      priv->infer->model_config.num_out_tensors) {
     GST_ERROR_OBJECT (self,
-      "postprocess dequantization.scale-factor count (%zu) must match num output tensors (%zu)",
-      priv->post_proc->dequant_data.size(), priv->infer->model_config.num_out_tensors);
+        "postprocess dequantization.scale-factor count (%zu) must match num output tensors (%zu)",
+        priv->post_proc->dequant_data.size (),
+        priv->infer->model_config.num_out_tensors);
     goto vart_error_free_in_tensors;
   }
 
   /* Set output tensor information */
   for (size_t i = 0; i < priv->infer->model_config.num_out_tensors; i++) {
-    priv->infer->model_config.out_tensors[i].name = g_strdup (output_tensors_info[i].name.c_str());
-    priv->infer->model_config.output_names.push_back(priv->infer->model_config.out_tensors[i].name);
-    priv->infer->model_config.out_tensors[i].direction = VVAS_TENSOR_DATA_DIRECTION_OUTPUT;
-    std::vector<int64_t> tmp_shape;
-    std::transform (output_tensors_info[i].shape.begin (), output_tensors_info[i].shape.end (),
-                    std::back_inserter (tmp_shape),
-                     [](uint32_t val){ return static_cast<int64_t>(val);});
-    priv->infer->model_config.output_shapes.push_back(std::move (tmp_shape));
+    priv->infer->model_config.out_tensors[i].name =
+        g_strdup (output_tensors_info[i].name.c_str ());
+    priv->infer->model_config.output_names.push_back (priv->infer->
+        model_config.out_tensors[i].name);
+    priv->infer->model_config.out_tensors[i].direction =
+        VVAS_TENSOR_DATA_DIRECTION_OUTPUT;
+    std::vector < int64_t > tmp_shape;
+    std::transform (output_tensors_info[i].shape.begin (),
+        output_tensors_info[i].shape.end (), std::back_inserter (tmp_shape),
+        [](uint32_t val) {
+        return static_cast < int64_t > (val);}
+    );
+    priv->infer->model_config.output_shapes.push_back (std::move (tmp_shape));
 
-    size_t shape_size = priv->infer->model_config.output_shapes.back().size();
+    size_t shape_size = priv->infer->model_config.output_shapes.back ().size ();
     priv->infer->model_config.out_tensors[i].valid_shapes = shape_size;
     for (size_t j = 0; j < shape_size; ++j) {
-      int64_t dim = priv->infer->model_config.output_shapes.back()[j];
-      priv->infer->model_config.out_tensors[i].shape[j] = static_cast<uint32_t>(dim);
+      int64_t dim = priv->infer->model_config.output_shapes.back ()[j];
+      priv->infer->model_config.out_tensors[i].shape[j] =
+          static_cast < uint32_t > (dim);
     }
-    priv->infer->model_config.out_tensors[i].size = output_tensors_info[i].size_in_bytes;
-    priv->infer->model_config.out_tensors[i].data_type = get_vvas_tensor_data_type(output_tensors_info[i].data_type);
-    auto quant = priv->infer->vart_info.runner->get_quant_parameters(output_tensors_info[i].name);
-    GST_DEBUG_OBJECT(self, "Output tensor[%zu] name: %s, scale: %f",
-        i, priv->infer->model_config.out_tensors[i].name,
-        quant.scale);
+    priv->infer->model_config.out_tensors[i].size =
+        output_tensors_info[i].size_in_bytes;
+    priv->infer->model_config.out_tensors[i].data_type =
+        get_vvas_tensor_data_type (output_tensors_info[i].data_type);
+    auto quant =
+        priv->infer->vart_info.
+        runner->get_quant_parameters (output_tensors_info[i].name);
+    GST_DEBUG_OBJECT (self, "Output tensor[%zu] name: %s, scale: %f", i,
+        priv->infer->model_config.out_tensors[i].name, quant.scale);
     if (priv->post_proc->enabled && priv->post_proc->is_dequant_set) {
       const float sf = priv->post_proc->dequant_data[i].scale_factor;
       priv->infer->model_config.out_tensors[i].scale_coeff = (1.0f / sf);
-    } else if (is_valid_positive_scale(quant.scale)) {
-      priv->infer->model_config.out_tensors[i].scale_coeff = (1.0f / quant.scale);
+    } else if (is_valid_positive_scale (quant.scale)) {
+      priv->infer->model_config.out_tensors[i].scale_coeff =
+          (1.0f / quant.scale);
     } else {
       priv->infer->model_config.out_tensors[i].scale_coeff = DEFAULT_QT_FCTR;
     }
+    vvas_xinfer_set_tensor_memory_layout (&priv->infer->model_config.out_tensors[i],
+        vart::to_string (output_tensors_info[i].memory_layout).data ());
+    GST_DEBUG_OBJECT (self, "Output tensor[%zu] memory_layout: %s", i,
+        priv->infer->model_config.out_tensors[i].memory_layout);
   }
 
   priv->infer->input_tensor_format = get_tensor_format (priv->infer->model_format,
-      input_tensors_info[0].memory_layout,
+      effective_layout,
       priv->infer->model_config.in_tensors[0].data_type);
   if (priv->infer->input_tensor_format == VVAS_VIDEO_FORMAT_UNKNOWN) {
     GST_ERROR_OBJECT (self, "Failed to get input tensor format");
@@ -1582,17 +1689,11 @@ priv_fill_model_config_vart (GstVvas_XInfer * self)
 
 vart_error_free_all_tensors:
   for (size_t i = 0; i < priv->infer->model_config.num_out_tensors; i++) {
-    if (priv->infer->model_config.out_tensors[i].name) {
-      g_free (priv->infer->model_config.out_tensors[i].name);
-      priv->infer->model_config.out_tensors[i].name = NULL;
-    }
+    vvas_xinfer_free_tensor_info (&priv->infer->model_config.out_tensors[i]);
   }
 vart_error_free_in_tensors:
   for (size_t i = 0; i < priv->infer->model_config.num_in_tensors; i++) {
-    if (priv->infer->model_config.in_tensors[i].name) {
-      g_free (priv->infer->model_config.in_tensors[i].name);
-      priv->infer->model_config.in_tensors[i].name = NULL;
-    }
+    vvas_xinfer_free_tensor_info (&priv->infer->model_config.in_tensors[i]);
   }
   return FALSE;
 }
@@ -1608,7 +1709,7 @@ vart_error_free_in_tensors:
  *
  */
 static gboolean
-vvas_xinfer_infer_init (GstVvas_XInfer * self)
+vvas_xinfer_infer_init (GstVvas_XInfer *self)
 {
   GstVvas_XInferPrivate *priv = self->priv;
   VvasReturnType vret;
@@ -1616,34 +1717,38 @@ vvas_xinfer_infer_init (GstVvas_XInfer * self)
   Ort::AllocatorWithDefaultOptions allocator;
   if (priv->infer->runtime == MLRuntime::VART &&
       priv->infer->vart_info.inp_tensor_type == vart::TensorType::HW) {
-      priv->infer->vvas_ctx = vvas_context_create(XDNA_DEVICE_IDX,
-          NULL, priv->core_log_level, &vret);
+    priv->infer->vvas_ctx = vvas_context_create (XDNA_DEVICE_IDX,
+        NULL, priv->core_log_level, &vret);
   } else {
-      priv->infer->vvas_ctx = vvas_context_create(-1, NULL,
-          priv->core_log_level, &vret);
+    priv->infer->vvas_ctx = vvas_context_create (-1, NULL,
+        priv->core_log_level, &vret);
   }
   if (!priv->infer->vvas_ctx) {
     GST_ERROR_OBJECT (self, "Couldn't create VVAS context");
     return FALSE;
   }
 
-  priv->infer->core_handle = (VvasCoreModule *) calloc (1, sizeof (VvasCoreModule));
+  priv->infer->core_handle =
+      (VvasCoreModule *) calloc (1, sizeof (VvasCoreModule));
   if (!priv->infer->core_handle) {
     GST_ERROR_OBJECT (self, "Failed to allocate memory");
     return FALSE;
   }
 
-  if(priv->infer->runtime == MLRuntime::VART)
-  {
+  if (priv->infer->runtime == MLRuntime::VART) {
     try {
-      std::string input_tensor_type = priv->infer->vart_info.inp_tensor_type == vart::TensorType::HW
-                                      ? std::string("HW") : std::string("CPU");
-      std::string output_tensor_type = priv->infer->vart_info.out_tensor_type == vart::TensorType::HW
-                                      ? std::string("HW") : std::string("CPU");
+      std::string input_tensor_type =
+          priv->infer->vart_info.inp_tensor_type ==
+          vart::TensorType::HW ? std::string ("HW") : std::string ("CPU");
+      std::string output_tensor_type =
+          priv->infer->vart_info.out_tensor_type ==
+          vart::TensorType::HW ? std::string ("HW") : std::string ("CPU");
       uint32_t xdna_device_index = 0;
-      GST_DEBUG_OBJECT (self, "Create VART runner E path = %s, in_tensor_type = %s, out_tensor_type = %s\n",
-            priv->infer->vart_info.model_path.c_str(), input_tensor_type.c_str(), output_tensor_type.c_str());
-      std::unordered_map<std::string, std::any> options = {
+      GST_DEBUG_OBJECT (self,
+          "Create VART runner E path = %s, in_tensor_type = %s, out_tensor_type = %s\n",
+          priv->infer->vart_info.model_path.c_str (),
+          input_tensor_type.c_str (), output_tensor_type.c_str ());
+      std::unordered_map < std::string, std::any > options = {
         {"debug", false},
         {"no_failsafe", false},
         {"ai_analyzer_profiling", priv->infer->vart_info.ai_analyzer_profiling},
@@ -1652,7 +1757,8 @@ vvas_xinfer_infer_init (GstVvas_XInfer * self)
         {"xdna_device_index", xdna_device_index}
       };
       if (priv->infer->vart_info.is_columns_sharing_option_provided) {
-        options["aie_columns_sharing"] = priv->infer->vart_info.aie_columns_sharing;
+        options["aie_columns_sharing"] =
+            priv->infer->vart_info.aie_columns_sharing;
       }
       if (priv->infer->vart_info.is_start_column_option_provided) {
         options["start_column"] = priv->infer->vart_info.start_column;
@@ -1660,13 +1766,20 @@ vvas_xinfer_infer_init (GstVvas_XInfer * self)
       if (priv->infer->vart_info.config_file_path != "") {
         options["config_json"] = priv->infer->vart_info.config_file_path;
       }
+      if (priv->infer->vart_info.use_async) {
+        /* Ensure async completion callbacks are delivered in submission
+         * order so results are queued to post-process in order. */
+        options["callback_order"] = std::string("submission");
+        GST_INFO_OBJECT (self, "async inference enabled; callback_order=submission");
+      }
       guint64 t0 = 0;
       if (priv->infer_profiler.enabled) {
-        strcpy(priv->infer_profiler.backend_runtime, "VART");
+        strcpy (priv->infer_profiler.backend_runtime, "VART");
         t0 = vvas_profiler_now_us ();
       }
 
-      priv->infer->vart_info.runner = vart::RunnerFactory::create_runner (vart::RunnerType::VAIML,
+      priv->infer->vart_info.runner =
+          vart::RunnerFactory::create_runner (vart::RunnerType::VAIML,
           priv->infer->vart_info.model_path, options);
 
       if (priv->infer_profiler.enabled) {
@@ -1679,34 +1792,40 @@ vvas_xinfer_infer_init (GstVvas_XInfer * self)
             priv->infer_profiler.infer.init_us / 1000.0);
       }
       GST_DEBUG_OBJECT (self, "VART runner created successfully\n");
-    } catch (const std::exception& e) {
-      GST_ERROR_OBJECT (self, "Create runner ERROR :: %s\n", e.what());
+    }
+    catch (const std::exception & e)
+    {
+      GST_ERROR_OBJECT (self, "Create runner ERROR :: %s\n", e.what ());
       free (priv->infer->core_handle);
       priv->infer->core_handle = NULL;
       return FALSE;
     }
   } else {
     GST_DEBUG_OBJECT (self, "Creating Onnx Runtime session for ONNX model: %s",
-      priv->infer->ort_info.model_path.c_str());
+        priv->infer->ort_info.model_path.c_str ());
     /* Create an Onnx Session and store it */
-    priv->infer->ort_info.env = std::make_unique<Ort::Env>(ORT_LOGGING_LEVEL_FATAL, "vvas_xinfer");
+    priv->infer->ort_info.env =
+        std::make_unique < Ort::Env > (ORT_LOGGING_LEVEL_FATAL, "vvas_xinfer");
     Ort::SessionOptions session_options;
-    session_options.SetLogSeverityLevel(ORT_LOGGING_LEVEL_FATAL);
-    auto options = std::unordered_map<std::string, std::string>{};
+    session_options.SetLogSeverityLevel (ORT_LOGGING_LEVEL_FATAL);
+    auto options = std::unordered_map < std::string, std::string > { };
     try {
       if (priv->infer->ort_info.enable_profiling) {
         if (priv->infer->ort_info.profiling_file_path != "")
-          session_options.EnableProfiling(priv->infer->ort_info.profiling_file_path.c_str());
+          session_options.EnableProfiling (priv->infer->
+              ort_info.profiling_file_path.c_str ());
         else
-          session_options.EnableProfiling("onnxruntime_profile_");
+          session_options.EnableProfiling ("onnxruntime_profile_");
       }
       if (priv->infer->ort_info.ep == OnnxRuntimeEP::VITIS_AI) {
         if (priv->infer->ort_info.vai_conf.file_path != "") {
           options["config_file"] = priv->infer->ort_info.vai_conf.file_path;
-          auto target = get_runtime_target(priv->infer->ort_info.vai_conf.file_path);
-          if (target.has_value()) {
-            GST_DEBUG_OBJECT(self, "Setting target: %s", target.value().c_str());
-            options["target"] = target.value();
+          auto target =
+              get_runtime_target (priv->infer->ort_info.vai_conf.file_path);
+          if (target.has_value ()) {
+            GST_DEBUG_OBJECT (self, "Setting target: %s",
+                target.value ().c_str ());
+            options["target"] = target.value ();
           }
         }
         if (priv->infer->ort_info.vai_conf.ai_analyzer_visualization)
@@ -1721,21 +1840,22 @@ vvas_xinfer_infer_init (GstVvas_XInfer * self)
           options["cache_dir"] = priv->infer->ort_info.vai_conf.cache_dir;
         if (priv->infer->ort_info.vai_conf.cache_key != "")
           options["cache_key"] = priv->infer->ort_info.vai_conf.cache_key;
-        session_options.AppendExecutionProvider_VitisAI(options);
+        session_options.AppendExecutionProvider_VitisAI (options);
       }
 
       guint64 t0 = 0;
       if (priv->infer_profiler.enabled) {
         if (priv->infer->ort_info.ep == OnnxRuntimeEP::VITIS_AI)
-          strcpy (priv->infer_profiler.backend_runtime, "onnxruntime:vitisai-ep");
+          strcpy (priv->infer_profiler.backend_runtime,
+              "onnxruntime:vitisai-ep");
         else
           strcpy (priv->infer_profiler.backend_runtime, "onnxruntime:cpu-ep");
         t0 = vvas_profiler_now_us ();
       }
 
       priv->infer->ort_info.session =
-          std::make_unique<Ort::Session>(*priv->infer->ort_info.env,
-              priv->infer->ort_info.model_path.c_str(), session_options);
+          std::make_unique < Ort::Session > (*priv->infer->ort_info.env,
+          priv->infer->ort_info.model_path.c_str (), session_options);
 
       if (priv->infer_profiler.enabled) {
         g_mutex_lock (&priv->infer_profiler.snap_lock);
@@ -1747,78 +1867,94 @@ vvas_xinfer_infer_init (GstVvas_XInfer * self)
             priv->infer_profiler.infer.init_us,
             priv->infer_profiler.infer.init_us / 1000.0);
       }
-    } catch (const std::exception &e) {
-      GST_ERROR_OBJECT(self, "Couldn't create ONNX Runtime session: %s", e.what());
-      priv->infer->ort_info.env.reset();
+    }
+    catch (const std::exception & e)
+    {
+      GST_ERROR_OBJECT (self, "Couldn't create ONNX Runtime session: %s",
+          e.what ());
+      priv->infer->ort_info.env.reset ();
       free (priv->infer->core_handle);
       priv->infer->core_handle = NULL;
       return false;
     }
   }
 
-  if(priv->infer->runtime == MLRuntime::VART){
+  if (priv->infer->runtime == MLRuntime::VART) {
     if (!priv_fill_model_config_vart (self))
       return FALSE;
   } else {
     /* Get input and output tensors to extract their info */
-    auto num_in_tensors = priv->infer->ort_info.session->GetInputCount();
-    auto num_out_tensors = priv->infer->ort_info.session->GetOutputCount();
+    auto num_in_tensors = priv->infer->ort_info.session->GetInputCount ();
+    auto num_out_tensors = priv->infer->ort_info.session->GetOutputCount ();
 
     GST_DEBUG_OBJECT (self, "Number of input tensors: %lu, "
-        "Number of output tensors: %lu", num_in_tensors,
-        num_out_tensors);
+        "Number of output tensors: %lu", num_in_tensors, num_out_tensors);
 
     priv->infer->model_config.num_in_tensors = num_in_tensors;
     priv->infer->model_config.num_out_tensors = num_out_tensors;
 
     /* Extract information about the input tensor */
     GST_DEBUG_OBJECT (self, "Input shape format: %s",
-        priv->infer->ort_info.input_tensor_layout.c_str());
+        priv->infer->ort_info.input_tensor_layout.c_str ());
     for (size_t i = 0; i < num_in_tensors; i++) {
-      auto name_ptr = priv->infer->ort_info.session->GetInputNameAllocated(i, allocator);
-      priv->infer->model_config.in_tensors[i].name = g_strdup(name_ptr.get());
-      priv->infer->model_config.input_names.push_back(priv->infer->model_config.in_tensors[i].name);
-      priv->infer->model_config.in_tensors[i].direction = VVAS_TENSOR_DATA_DIRECTION_INPUT;
-      auto type_info = priv->infer->ort_info.session->GetInputTypeInfo(i);
-      auto ort_tensor_info = type_info.GetTensorTypeAndShapeInfo();
-      auto tensor_shape = ort_tensor_info.GetShape();
-      if(tensor_shape[0] == -1) {
+      auto name_ptr =
+          priv->infer->ort_info.session->GetInputNameAllocated (i, allocator);
+      priv->infer->model_config.in_tensors[i].name = g_strdup (name_ptr.get ());
+      priv->infer->model_config.input_names.push_back (priv->
+          infer->model_config.in_tensors[i].name);
+      priv->infer->model_config.in_tensors[i].direction =
+          VVAS_TENSOR_DATA_DIRECTION_INPUT;
+      auto type_info = priv->infer->ort_info.session->GetInputTypeInfo (i);
+      auto ort_tensor_info = type_info.GetTensorTypeAndShapeInfo ();
+      auto tensor_shape = ort_tensor_info.GetShape ();
+      if (tensor_shape[0] == -1) {
         priv->infer->model_config.dynamic_shape = TRUE;
-        tensor_shape = get_fixed_shape(tensor_shape, priv->infer->batch_size);
+        tensor_shape = get_fixed_shape (tensor_shape, priv->infer->batch_size);
       }
-      priv->infer->model_config.input_shapes.push_back(tensor_shape);
-      size_t shape_size = std::min (priv->infer->model_config.input_shapes.back().size(),
-          static_cast<size_t> (MAX_SHAPE_SIZE));
+      priv->infer->model_config.input_shapes.push_back (tensor_shape);
+      size_t shape_size =
+          std::min (priv->infer->model_config.input_shapes.back ().size (),
+          static_cast < size_t >(MAX_SHAPE_SIZE));
       priv->infer->model_config.in_tensors[i].valid_shapes = shape_size;
       for (size_t j = 0; j < shape_size; ++j) {
-          int64_t dim = priv->infer->model_config.input_shapes.back()[j];
-          priv->infer->model_config.in_tensors[i].shape[j] = static_cast<uint32_t>(dim);
+        int64_t dim = priv->infer->model_config.input_shapes.back ()[j];
+        priv->infer->model_config.in_tensors[i].shape[j] =
+            static_cast < uint32_t > (dim);
       }
       priv->infer->model_config.in_tensors[i].size =
-          get_tensor_size_in_bytes(ort_tensor_info.GetElementType(), std::move(tensor_shape));
-      priv->infer->model_config.in_tensors[i].data_type = get_vvas_tensor_data_type(ort_tensor_info);
+          get_tensor_size_in_bytes (ort_tensor_info.GetElementType (),
+          std::move (tensor_shape));
+      priv->infer->model_config.in_tensors[i].data_type =
+          get_vvas_tensor_data_type (ort_tensor_info);
       priv->infer->model_config.in_tensors[i].scale_coeff = DEFAULT_QT_FCTR;
+      vvas_xinfer_set_tensor_memory_layout (&priv->infer->model_config.in_tensors[i],
+          priv->infer->ort_info.input_tensor_layout.c_str ());
     }
 
     /* Set batch size, model height, and model width based on input tensor layout */
-    priv->infer->model_config.batch_size = priv->infer->model_config.in_tensors[0].shape[0];
+    priv->infer->model_config.batch_size =
+        priv->infer->model_config.in_tensors[0].shape[0];
     if (priv->infer->ort_info.input_tensor_layout == "NCHW") {
-      priv->infer->model_config.model_height = priv->infer->model_config.in_tensors[0].shape[2];
-      priv->infer->model_config.model_width = priv->infer->model_config.in_tensors[0].shape[3];
+      priv->infer->model_config.model_height =
+          priv->infer->model_config.in_tensors[0].shape[2];
+      priv->infer->model_config.model_width =
+          priv->infer->model_config.in_tensors[0].shape[3];
     } else if (priv->infer->ort_info.input_tensor_layout == "NHWC") {
-      priv->infer->model_config.model_height = priv->infer->model_config.in_tensors[0].shape[1];
-      priv->infer->model_config.model_width = priv->infer->model_config.in_tensors[0].shape[2];
+      priv->infer->model_config.model_height =
+          priv->infer->model_config.in_tensors[0].shape[1];
+      priv->infer->model_config.model_width =
+          priv->infer->model_config.in_tensors[0].shape[2];
     } else {
-      GST_ERROR_OBJECT(self, "Unknown input tensor layout: %s",
-          priv->infer->ort_info.input_tensor_layout.c_str());
+      GST_ERROR_OBJECT (self, "Unknown input tensor layout: %s",
+          priv->infer->ort_info.input_tensor_layout.c_str ());
       goto onnx_error_free_in_tensors;
     }
 
     /* Validate the number of input tensors, as per assumption */
     if (priv->infer->model_config.num_in_tensors != 1) {
       GST_ERROR_OBJECT (self,
-        "Only single input tensor models are supported. Current model has %lu input tensors.",
-        priv->infer->model_config.num_in_tensors);
+          "Only single input tensor models are supported. Current model has %lu input tensors.",
+          priv->infer->model_config.num_in_tensors);
       goto onnx_error_free_in_tensors;
     }
 
@@ -1831,63 +1967,70 @@ vvas_xinfer_infer_init (GstVvas_XInfer * self)
 
     /* Set output tensor information */
     for (size_t i = 0; i < num_out_tensors; i++) {
-      auto name_ptr = priv->infer->ort_info.session->GetOutputNameAllocated(i, allocator);
-      priv->infer->model_config.out_tensors[i].name = g_strdup(name_ptr.get());
-      priv->infer->model_config.output_names.push_back(priv->infer->model_config.out_tensors[i].name);
-      priv->infer->model_config.out_tensors[i].direction = VVAS_TENSOR_DATA_DIRECTION_OUTPUT;
-      auto type_info = priv->infer->ort_info.session->GetOutputTypeInfo(i);
-      auto ort_tensor_info = type_info.GetTensorTypeAndShapeInfo();
-      auto tensor_shape = ort_tensor_info.GetShape();
-      if(tensor_shape[0] == -1) {
+      auto name_ptr =
+          priv->infer->ort_info.session->GetOutputNameAllocated (i, allocator);
+      priv->infer->model_config.out_tensors[i].name =
+          g_strdup (name_ptr.get ());
+      priv->infer->model_config.output_names.push_back (priv->
+          infer->model_config.out_tensors[i].name);
+      priv->infer->model_config.out_tensors[i].direction =
+          VVAS_TENSOR_DATA_DIRECTION_OUTPUT;
+      auto type_info = priv->infer->ort_info.session->GetOutputTypeInfo (i);
+      auto ort_tensor_info = type_info.GetTensorTypeAndShapeInfo ();
+      auto tensor_shape = ort_tensor_info.GetShape ();
+      if (tensor_shape[0] == -1) {
         priv->infer->model_config.dynamic_shape = TRUE;
-        tensor_shape = get_fixed_shape(tensor_shape, priv->infer->batch_size);
+        tensor_shape = get_fixed_shape (tensor_shape, priv->infer->batch_size);
       }
-      priv->infer->model_config.output_shapes.push_back(tensor_shape);
-      size_t shape_size = priv->infer->model_config.output_shapes.back().size();
+      priv->infer->model_config.output_shapes.push_back (tensor_shape);
+      size_t shape_size =
+          priv->infer->model_config.output_shapes.back ().size ();
       priv->infer->model_config.out_tensors[i].valid_shapes = shape_size;
       for (size_t j = 0; j < shape_size; ++j) {
-        int64_t dim = priv->infer->model_config.output_shapes.back()[j];
-        priv->infer->model_config.out_tensors[i].shape[j] = static_cast<uint32_t>(dim);
+        int64_t dim = priv->infer->model_config.output_shapes.back ()[j];
+        priv->infer->model_config.out_tensors[i].shape[j] =
+            static_cast < uint32_t > (dim);
       }
       priv->infer->model_config.out_tensors[i].size =
-          get_tensor_size_in_bytes(ort_tensor_info.GetElementType(), std::move(tensor_shape));
-      priv->infer->model_config.out_tensors[i].data_type = get_vvas_tensor_data_type(ort_tensor_info);
+          get_tensor_size_in_bytes (ort_tensor_info.GetElementType (),
+          std::move (tensor_shape));
+      priv->infer->model_config.out_tensors[i].data_type =
+          get_vvas_tensor_data_type (ort_tensor_info);
       priv->infer->model_config.out_tensors[i].scale_coeff = DEFAULT_QT_FCTR;
+      if (!priv->infer->ort_info.output_tensor_layout.empty ()) {
+        vvas_xinfer_set_tensor_memory_layout (&priv->infer->model_config.out_tensors[i],
+            priv->infer->ort_info.output_tensor_layout.c_str ());
+      }
     }
 
-    priv->infer->input_tensor_format = get_tensor_format(priv->infer->model_format,
-      priv->infer->ort_info.input_tensor_layout,
-      priv->infer->model_config.in_tensors[0].data_type);
+    priv->infer->input_tensor_format =
+        get_tensor_format (priv->infer->model_format,
+        priv->infer->ort_info.input_tensor_layout,
+        priv->infer->model_config.in_tensors[0].data_type);
     if (priv->infer->input_tensor_format == VVAS_VIDEO_FORMAT_UNKNOWN) {
       GST_ERROR_OBJECT (self,
           "Failed to get input tensor format for model format: %d, layout: %s, data type: %d",
           priv->infer->model_format,
-          priv->infer->ort_info.input_tensor_layout.c_str(),
+          priv->infer->ort_info.input_tensor_layout.c_str (),
           priv->infer->model_config.in_tensors[0].data_type);
       goto onnx_error_free_all_tensors;
     }
     goto onnx_tensor_config_done;
 
-onnx_error_free_all_tensors:
+  onnx_error_free_all_tensors:
     for (size_t i = 0; i < num_out_tensors; i++) {
-      if (priv->infer->model_config.out_tensors[i].name) {
-        g_free (priv->infer->model_config.out_tensors[i].name);
-        priv->infer->model_config.out_tensors[i].name = NULL;
-      }
+      vvas_xinfer_free_tensor_info (&priv->infer->model_config.out_tensors[i]);
     }
-onnx_error_free_in_tensors:
+  onnx_error_free_in_tensors:
     for (size_t i = 0; i < num_in_tensors; i++) {
-      if (priv->infer->model_config.in_tensors[i].name) {
-        g_free (priv->infer->model_config.in_tensors[i].name);
-        priv->infer->model_config.in_tensors[i].name = NULL;
-      }
+      vvas_xinfer_free_tensor_info (&priv->infer->model_config.in_tensors[i]);
     }
     if (priv->infer->ort_info.session) {
-      priv->infer->ort_info.session.reset();
+      priv->infer->ort_info.session.reset ();
       priv->infer->ort_info.session = nullptr;
     }
     if (priv->infer->ort_info.env) {
-      priv->infer->ort_info.env.reset();
+      priv->infer->ort_info.env.reset ();
       priv->infer->ort_info.env = nullptr;
     }
     if (priv->infer->vvas_ctx) {
@@ -1899,15 +2042,15 @@ onnx_error_free_in_tensors:
       priv->infer->core_handle = NULL;
     }
     return FALSE;
-onnx_tensor_config_done:;
+  onnx_tensor_config_done:;
   }
 
-    /* set VvasVideoFormat for input tensor type based on network data type and layout */
-  if (priv->infer->model_config.in_tensors[0].data_type == VVAS_TENSOR_DATA_TYPE_UNKNOWN) {
-      GST_ERROR_OBJECT (self,
-        "Input Tensor Type %d is not compatible with VVAS",
-        static_cast<int>(priv->infer->model_config.in_tensors[0].data_type));
-      return FALSE;
+  /* set VvasVideoFormat for input tensor type based on network data type and layout */
+  if (priv->infer->model_config.in_tensors[0].data_type ==
+      VVAS_TENSOR_DATA_TYPE_UNKNOWN) {
+    GST_ERROR_OBJECT (self, "Input Tensor Type %d is not compatible with VVAS",
+        static_cast < int >(priv->infer->model_config.in_tensors[0].data_type));
+    return FALSE;
   }
 
   {
@@ -1916,15 +2059,17 @@ onnx_tensor_config_done:;
     std::ostringstream shape_stream;
 
     GST_DEBUG_OBJECT (self, "Input tensor format set to %d",
-        priv->infer->input_tensor_format == VVAS_VIDEO_FORMAT_UNKNOWN ? priv->infer->model_format :
-        priv->infer->input_tensor_format);
+        priv->infer->input_tensor_format ==
+        VVAS_VIDEO_FORMAT_UNKNOWN ? priv->infer->model_format : priv->
+        infer->input_tensor_format);
     GST_DEBUG_OBJECT (self, "Number of Batches: %d",
         priv->infer->model_config.batch_size);
     GST_DEBUG_OBJECT (self, "Number of Inputs: %ld",
         priv->infer->model_config.num_in_tensors);
     GST_DEBUG_OBJECT (self, "Number of Outputs: %ld",
         priv->infer->model_config.num_out_tensors);
-    GST_DEBUG_OBJECT (self, "Model width: %d", priv->infer->model_config.model_width);
+    GST_DEBUG_OBJECT (self, "Model width: %d",
+        priv->infer->model_config.model_width);
     GST_DEBUG_OBJECT (self, "Model height: %d",
         priv->infer->model_config.model_height);
 
@@ -1939,15 +2084,16 @@ onnx_tensor_config_done:;
       GST_DEBUG_OBJECT (self,
           "InputTensor[%lu] quantization_factor %lf", j,
           priv->infer->model_config.in_tensors[j].scale_coeff);
-      for (size_t k = 0; k < priv->infer->model_config.in_tensors[j].valid_shapes; ++k) {
+      for (size_t k = 0;
+          k < priv->infer->model_config.in_tensors[j].valid_shapes; ++k) {
         shape_stream << priv->infer->model_config.in_tensors[j].shape[k];
         if (k + 1 < priv->infer->model_config.in_tensors[j].valid_shapes)
           shape_stream << "*";
       }
       GST_DEBUG_OBJECT (self, "Input tensor shape [%zu]: %s", j,
-          shape_stream.str().c_str());
-      shape_stream.str("");
-      shape_stream.clear();
+          shape_stream.str ().c_str ());
+      shape_stream.str ("");
+      shape_stream.clear ();
     }
 
     for (size_t j = 0; j < numOutputTensor; ++j) {
@@ -1960,15 +2106,16 @@ onnx_tensor_config_done:;
       GST_DEBUG_OBJECT (self,
           "OutputTensor[%lu] quantization_factor %lf", j,
           priv->infer->model_config.out_tensors[j].scale_coeff);
-      for (size_t k = 0; k < priv->infer->model_config.out_tensors[j].valid_shapes; ++k) {
+      for (size_t k = 0;
+          k < priv->infer->model_config.out_tensors[j].valid_shapes; ++k) {
         shape_stream << priv->infer->model_config.out_tensors[j].shape[k];
         if (k + 1 < priv->infer->model_config.out_tensors[j].valid_shapes)
           shape_stream << "*";
       }
       GST_DEBUG_OBJECT (self, "Output tensor shape [%zu]: %s", j,
-        shape_stream.str().c_str());
-      shape_stream.str("");
-      shape_stream.clear();
+          shape_stream.str ().c_str ());
+      shape_stream.str ("");
+      shape_stream.clear ();
     }
   }
 
@@ -2004,7 +2151,7 @@ onnx_tensor_config_done:;
  *
  */
 static gboolean
-vvas_xinfer_ppe_deinit (GstVvas_XInfer * self)
+vvas_xinfer_ppe_deinit (GstVvas_XInfer *self)
 {
   GstVvas_XInferPrivate *priv = self->priv;
   VvasCoreModule *ppe_handle = priv->pre_proc->core_handle;
@@ -2053,7 +2200,7 @@ vvas_xinfer_ppe_deinit (GstVvas_XInfer * self)
     priv->pre_proc->vvas_ctx = NULL;
   }
 
-  priv->pre_proc.reset();
+  priv->pre_proc.reset ();
 
   return TRUE;
 }
@@ -2069,7 +2216,7 @@ vvas_xinfer_ppe_deinit (GstVvas_XInfer * self)
  *
  */
 static gboolean
-vvas_xinfer_postproc_deinit (GstVvas_XInfer * self)
+vvas_xinfer_postproc_deinit (GstVvas_XInfer *self)
 {
   GstVvas_XInferPrivate *priv = self->priv;
   VvasReturnType vret;
@@ -2096,11 +2243,11 @@ vvas_xinfer_postproc_deinit (GstVvas_XInfer * self)
       GST_ERROR_OBJECT (self, "Failed to destroy post process");
     }
     if (priv->infer_profiler.enabled && priv->infer_profiler.post_proc.enabled) {
-        g_mutex_lock (&priv->infer_profiler.snap_lock);
-        priv->infer_profiler.post_proc.deinit_us = vvas_profiler_now_us () - t0;
-        g_mutex_unlock (&priv->infer_profiler.snap_lock);
-        GST_DEBUG_OBJECT (self, "Post-process deinitialization time: %lu us",
-            priv->infer_profiler.post_proc.deinit_us);
+      g_mutex_lock (&priv->infer_profiler.snap_lock);
+      priv->infer_profiler.post_proc.deinit_us = vvas_profiler_now_us () - t0;
+      g_mutex_unlock (&priv->infer_profiler.snap_lock);
+      GST_DEBUG_OBJECT (self, "Post-process deinitialization time: %lu us",
+          priv->infer_profiler.post_proc.deinit_us);
     }
   }
 
@@ -2112,7 +2259,7 @@ vvas_xinfer_postproc_deinit (GstVvas_XInfer * self)
   priv->post_proc->json_string = NULL;
   priv->post_proc->library_path = NULL;
 
-  priv->post_proc.reset();
+  priv->post_proc.reset ();
 
   return TRUE;
 }
@@ -2128,16 +2275,16 @@ vvas_xinfer_postproc_deinit (GstVvas_XInfer * self)
  *
  */
 static gboolean
-vvas_xinfer_infer_deinit (GstVvas_XInfer * self)
+vvas_xinfer_infer_deinit (GstVvas_XInfer *self)
 {
   GstVvas_XInferPrivate *priv = self->priv;
   VvasCoreModule *infer_handle = priv->infer->core_handle;
 
   if (infer_handle) {
     if (priv->infer->ort_info.session) {
-      priv->infer->ort_info.session.reset();
+      priv->infer->ort_info.session.reset ();
       priv->infer->ort_info.session = nullptr;
-      priv->infer->ort_info.env.reset();
+      priv->infer->ort_info.env.reset ();
       priv->infer->ort_info.env = nullptr;
     }
     free (priv->infer->core_handle);
@@ -2145,34 +2292,29 @@ vvas_xinfer_infer_deinit (GstVvas_XInfer * self)
   }
 
   if (priv->infer->input_class_filters) {
-    g_list_free_full (priv->infer->input_class_filters, (GDestroyNotify) g_free);
+    g_list_free_full (priv->infer->input_class_filters,
+        (GDestroyNotify) g_free);
     priv->infer->input_class_filters = NULL;
   }
 
   for (size_t i = 0; i < priv->infer->model_config.num_in_tensors; i++) {
-    if (priv->infer->model_config.in_tensors[i].name) {
-      g_free (priv->infer->model_config.in_tensors[i].name);
-      priv->infer->model_config.in_tensors[i].name = NULL;
-    }
+    vvas_xinfer_free_tensor_info (&priv->infer->model_config.in_tensors[i]);
   }
 
   for (size_t i = 0; i < priv->infer->model_config.num_out_tensors; i++) {
-    if (priv->infer->model_config.out_tensors[i].name) {
-      g_free (priv->infer->model_config.out_tensors[i].name);
-      priv->infer->model_config.out_tensors[i].name = NULL;
-    }
+    vvas_xinfer_free_tensor_info (&priv->infer->model_config.out_tensors[i]);
   }
 
   priv->infer->model_config.num_in_tensors = 0;
   priv->infer->model_config.num_out_tensors = 0;
-  priv->infer->model_config.input_names.clear();
-  priv->infer->model_config.input_names.shrink_to_fit();
-  priv->infer->model_config.output_names.clear();
-  priv->infer->model_config.output_names.shrink_to_fit();
-  priv->infer->model_config.input_shapes.clear();
-  priv->infer->model_config.input_shapes.shrink_to_fit();
-  priv->infer->model_config.output_shapes.clear();
-  priv->infer->model_config.output_shapes.shrink_to_fit();
+  priv->infer->model_config.input_names.clear ();
+  priv->infer->model_config.input_names.shrink_to_fit ();
+  priv->infer->model_config.output_names.clear ();
+  priv->infer->model_config.output_names.shrink_to_fit ();
+  priv->infer->model_config.input_shapes.clear ();
+  priv->infer->model_config.input_shapes.shrink_to_fit ();
+  priv->infer->model_config.output_shapes.clear ();
+  priv->infer->model_config.output_shapes.shrink_to_fit ();
 
   /* Destroy VVAS Context */
   if (priv->infer->vvas_ctx) {
@@ -2185,14 +2327,16 @@ vvas_xinfer_infer_deinit (GstVvas_XInfer * self)
     t0 = vvas_profiler_now_us ();
   }
 
-  priv->infer.reset();
+  priv->infer.reset ();
 
   if (priv->infer_profiler.enabled && priv->infer_profiler.infer.enabled) {
     g_mutex_lock (&priv->infer_profiler.snap_lock);
     priv->infer_profiler.infer.deinit_us = vvas_profiler_now_us () - t0;
     g_mutex_unlock (&priv->infer_profiler.snap_lock);
-    GST_DEBUG_OBJECT (self, "Inference deinitialization time (backend: %s): %lu us",
-        priv->infer_profiler.backend_runtime, priv->infer_profiler.infer.deinit_us);
+    GST_DEBUG_OBJECT (self,
+        "Inference deinitialization time (backend: %s): %lu us",
+        priv->infer_profiler.backend_runtime,
+        priv->infer_profiler.infer.deinit_us);
   }
 
   return TRUE;
@@ -2210,7 +2354,7 @@ vvas_xinfer_infer_deinit (GstVvas_XInfer * self)
  * @return TRUE on success, FALSE if sync_bo failed
  */
 static gboolean
-vvas_xinfer_sync_vvas_dmabuf_to_device_if_needed (GstVvas_XInfer * self,
+vvas_xinfer_sync_vvas_dmabuf_to_device_if_needed (GstVvas_XInfer *self,
     GstMemory *in_mem)
 {
   if (!gst_is_dmabuf_memory (in_mem) || !gst_is_vvas_memory (in_mem))
@@ -2258,9 +2402,8 @@ vvas_xinfer_sync_vvas_dmabuf_to_device_if_needed (GstVvas_XInfer * self,
  *
  */
 static gboolean
-vvas_xinfer_prepare_ppe_input_frame (GstVvas_XInfer * self, GstBuffer * inbuf,
-    GstVideoInfo * in_vinfo, GstBuffer ** new_inbuf,
-    VvasVideoFrame ** vvas_frame)
+vvas_xinfer_prepare_ppe_input_frame (GstVvas_XInfer *self, GstBuffer *inbuf,
+    GstVideoInfo *in_vinfo, GstBuffer **new_inbuf, VvasVideoFrame **vvas_frame)
 {
   GstVvas_XInferPrivate *priv = self->priv;
   guint64 phy_addr = 0;
@@ -2280,7 +2423,7 @@ vvas_xinfer_prepare_ppe_input_frame (GstVvas_XInfer * self, GstBuffer * inbuf,
     /* prepare HW input buffer to send it to preprocess */
     if (gst_is_vvas_memory (in_mem)) {
       if (gst_vvas_memory_can_avoid_copy (in_mem, priv->pre_proc->dev_idx,
-            priv->pre_proc->in_mem_bank)) {
+              priv->pre_proc->in_mem_bank)) {
         phy_addr = gst_vvas_allocator_get_paddr (in_mem);
         bo_handle = gst_vvas_allocator_get_bo (in_mem);
       }
@@ -2363,8 +2506,8 @@ vvas_xinfer_prepare_ppe_input_frame (GstVvas_XInfer * self, GstBuffer * inbuf,
         static_cast < GstMapFlags >
         (GST_MAP_READ | GST_VIDEO_FRAME_MAP_FLAG_NO_REF);
     *vvas_frame =
-        vvas_videoframe_from_gstbuffer (priv->pre_proc->vvas_ctx, -1, inbuf, in_vinfo,
-        map_flags);
+        vvas_videoframe_from_gstbuffer (priv->pre_proc->vvas_ctx, -1, inbuf,
+        in_vinfo, map_flags);
   }
 
   GST_LOG_OBJECT (self, "successfully prepared ppe input vvas frame");
@@ -2395,22 +2538,19 @@ error:
  *
  */
 static gboolean
-vvas_xinfer_prepare_infer_input_frame (GstVvas_XInfer * self, GstBuffer * inbuf,
-    GstVideoInfo * in_vinfo, VvasVideoFrame ** vvas_frame,
-    GstBuffer ** new_inbuf)
+vvas_xinfer_prepare_infer_input_frame (GstVvas_XInfer *self, GstBuffer *inbuf,
+    GstVideoInfo *in_vinfo, VvasVideoFrame **vvas_frame, GstBuffer **new_inbuf)
 {
   GstVvas_XInferPrivate *priv = self->priv;
-  std::unique_ptr<GstCaps, decltype (&gst_caps_unref)> curr_sinkcaps (
-    gst_pad_get_current_caps (GST_BASE_TRANSFORM (self)->sinkpad),
-    &gst_caps_unref ); /* automatically unref caps at function exit!! */
+  std::unique_ptr < GstCaps, decltype (&gst_caps_unref) > curr_sinkcaps (gst_pad_get_current_caps (GST_BASE_TRANSFORM (self)->sinkpad), &gst_caps_unref);       /* automatically unref caps at function exit!! */
 
   if (new_inbuf)
     *new_inbuf = NULL;
 
   int mbank_idx = -1;
   VvasContext *vvas_ctx = priv->infer->vvas_ctx;
-  if(priv->infer->runtime == MLRuntime::VART &&
-    priv->infer->vart_info.inp_tensor_type == vart::TensorType::HW) {
+  if (priv->infer->runtime == MLRuntime::VART &&
+      priv->infer->vart_info.inp_tensor_type == vart::TensorType::HW) {
 
     /* If upstream did not honour our propose_allocation (e.g. filesrc /
      * multifilesrc / rawvideoparse), the buffer here is plain SW memory
@@ -2418,7 +2558,7 @@ vvas_xinfer_prepare_infer_input_frame (GstVvas_XInfer * self, GstBuffer * inbuf,
     GstBuffer *internal_inbuf = NULL;
     if (!vvas_xinfer_ensure_xrt_input_buffer (self, inbuf,
             XDNA_DEVICE_IDX, NULL, priv->infer->vart_info.mbank_idx,
-            1 /* no stride alignment for raw tensor data */,
+            1 /* no stride alignment for raw tensor data */ ,
             &internal_inbuf)) {
       return FALSE;
     }
@@ -2434,23 +2574,27 @@ vvas_xinfer_prepare_infer_input_frame (GstVvas_XInfer * self, GstBuffer * inbuf,
       inbuf = internal_inbuf;
     }
 
-    std::unique_ptr<GstMemory, decltype(&gst_memory_unref)> in_mem (
-      gst_buffer_get_memory (inbuf, 0), gst_memory_unref);
+    std::unique_ptr < GstMemory,
+        decltype (&gst_memory_unref) > in_mem (gst_buffer_get_memory (inbuf, 0),
+        gst_memory_unref);
 
-    if (gst_is_vvas_memory (in_mem.get())) {
+    if (gst_is_vvas_memory (in_mem.get ())) {
       /* VVAS DMA memory — extract actual bank and context from allocator */
-      guint mbank = gst_vvas_memory_get_mem_bank (in_mem.get());
-      if (mbank == (guint)-1) {
-        GST_ERROR_OBJECT (self, "failed to get memory bank for HW input tensor type");
+      guint mbank = gst_vvas_memory_get_mem_bank (in_mem.get ());
+      if (mbank == (guint) - 1) {
+        GST_ERROR_OBJECT (self,
+            "failed to get memory bank for HW input tensor type");
         return FALSE;
       }
-      mbank_idx = static_cast<int>(mbank);
-      vvas_ctx = static_cast<VvasContext*>(gst_vvas_memory_get_vvas_ctx (in_mem.get()));
+      mbank_idx = static_cast < int >(mbank);
+      vvas_ctx =
+          static_cast <
+          VvasContext * >(gst_vvas_memory_get_vvas_ctx (in_mem.get ()));
       if (!vvas_ctx) {
         GST_ERROR_OBJECT (self, "failed to get VVAS context");
         return FALSE;
       }
-    } else if (gst_is_dmabuf_memory (in_mem.get())) {
+    } else if (gst_is_dmabuf_memory (in_mem.get ())) {
       /* External dmabuf (e.g. v4l2src io-mode=dmabuf) — use default bank */
       mbank_idx = DEFAULT_MBANK_IDX;
     }
@@ -2458,18 +2602,17 @@ vvas_xinfer_prepare_infer_input_frame (GstVvas_XInfer * self, GstBuffer * inbuf,
     /* Flush CPU cache for DMABUF-exported VVAS buffers before VART HW
      * zero-copy inference when appropriate; see
      * vvas_xinfer_sync_vvas_dmabuf_to_device_if_needed(). */
-    if (!vvas_xinfer_sync_vvas_dmabuf_to_device_if_needed (self,
-            in_mem.get ())) {
+    if (!vvas_xinfer_sync_vvas_dmabuf_to_device_if_needed (self, in_mem.get ())) {
       return FALSE;
     }
   }
 
   GstMapFlags map_flags = static_cast < GstMapFlags >
-              (GST_MAP_READ | GST_VIDEO_FRAME_MAP_FLAG_NO_REF);
+      (GST_MAP_READ | GST_VIDEO_FRAME_MAP_FLAG_NO_REF);
 
   *vvas_frame =
-    vvas_videoframe_from_gstbuffer (vvas_ctx, mbank_idx, inbuf, in_vinfo,
-    map_flags);
+      vvas_videoframe_from_gstbuffer (vvas_ctx, mbank_idx, inbuf, in_vinfo,
+      map_flags);
 
 #ifdef DUMP_INFER_INPUT
   {
@@ -2507,9 +2650,9 @@ vvas_xinfer_prepare_infer_input_frame (GstVvas_XInfer * self, GstBuffer * inbuf,
 }
 
 static int
-vvas_image_process_create_frame_rect (GstVvas_XInfer * self,
-    VvasVideoFrame * input[MAX_ROI],
-    VvasVideoFrame * output[MAX_ROI], vvas_ms_roi * roi_data)
+vvas_image_process_create_frame_rect (GstVvas_XInfer *self,
+    VvasVideoFrame *input[MAX_ROI],
+    VvasVideoFrame *output[MAX_ROI], vvas_ms_roi *roi_data)
 {
   guint chan_id;
   GstVvas_XInferPrivate *priv = self->priv;
@@ -2544,32 +2687,39 @@ vvas_image_process_create_frame_rect (GstVvas_XInfer * self,
     dst_rect.height = out_vinfo.height;
     dst_rect.frame = output[chan_id];
 
-    if (!vvas_image_process_align_rect_params (&self->priv->
-            pre_proc->caps->alignment_req, in_info.fmt, &src_rect)) {
+    if (!vvas_image_process_align_rect_params (&self->priv->pre_proc->
+            caps->alignment_req, in_info.fmt, &src_rect)) {
       GST_ERROR_OBJECT (self, "failed to align src_rect");
       return 0;
     }
 
-    if (!vvas_image_process_align_rect_params (&self->priv->
-            pre_proc->caps->alignment_req, out_vinfo.fmt, &dst_rect)) {
+    if (!vvas_image_process_align_rect_params (&self->priv->pre_proc->
+            caps->alignment_req, out_vinfo.fmt, &dst_rect)) {
       GST_ERROR_OBJECT (self, "failed to align dst_rect");
       return 0;
     }
 
     /* Add the frame for processing */
     vret =
-        vvas_image_process_add_frame (priv->pre_proc->core_handle->handle, &src_rect,
-        &dst_rect, &priv->pre_proc->param);
+        vvas_image_process_add_frame (priv->pre_proc->core_handle->handle,
+        &src_rect, &dst_rect, &priv->pre_proc->param);
 
-    priv->pre_proc->frame->input_roi.roi[chan_id].width = (uint32_t) src_rect.width;
-    priv->pre_proc->frame->input_roi.roi[chan_id].height = (uint32_t) src_rect.height;
-    priv->pre_proc->frame->input_roi.roi[chan_id].x_cord = (uint32_t) src_rect.x;
-    priv->pre_proc->frame->input_roi.roi[chan_id].y_cord = (uint32_t) src_rect.y;
-    priv->pre_proc->frame->output_roi.roi[chan_id].width = (uint32_t) dst_rect.width;
+    priv->pre_proc->frame->input_roi.roi[chan_id].width =
+        (uint32_t) src_rect.width;
+    priv->pre_proc->frame->input_roi.roi[chan_id].height =
+        (uint32_t) src_rect.height;
+    priv->pre_proc->frame->input_roi.roi[chan_id].x_cord =
+        (uint32_t) src_rect.x;
+    priv->pre_proc->frame->input_roi.roi[chan_id].y_cord =
+        (uint32_t) src_rect.y;
+    priv->pre_proc->frame->output_roi.roi[chan_id].width =
+        (uint32_t) dst_rect.width;
     priv->pre_proc->frame->output_roi.roi[chan_id].height =
         (uint32_t) dst_rect.height;
-    priv->pre_proc->frame->output_roi.roi[chan_id].x_cord = (uint32_t) dst_rect.x;
-    priv->pre_proc->frame->output_roi.roi[chan_id].y_cord = (uint32_t) dst_rect.y;
+    priv->pre_proc->frame->output_roi.roi[chan_id].x_cord =
+        (uint32_t) dst_rect.x;
+    priv->pre_proc->frame->output_roi.roi[chan_id].y_cord =
+        (uint32_t) dst_rect.y;
 
     if (VVAS_IS_ERROR (vret)) {
       GST_ERROR_OBJECT (self, "failed to add frame for processing");
@@ -2584,7 +2734,7 @@ vvas_image_process_create_frame_rect (GstVvas_XInfer * self,
 }
 
 static gboolean
-preprocessor_node_foreach (GNode * node, gpointer ptr)
+preprocessor_node_foreach (GNode *node, gpointer ptr)
 {
   GstVvas_XInfer *self = (GstVvas_XInfer *) ptr;
   GstVvas_XInferPrivate *priv = self->priv;
@@ -2608,8 +2758,8 @@ preprocessor_node_foreach (GNode * node, gpointer ptr)
         (detection->bbox.height > priv->infer->input_obj_max_height)) {
       return FALSE;
     }
-    if (!priv->pre_proc->frame->is_ppe_required[g_node_child_position (node->parent,
-                node)]) {
+    if (!priv->pre_proc->frame->
+        is_ppe_required[g_node_child_position (node->parent, node)]) {
       GST_DEBUG_OBJECT (self,
           "Skipping preprocess on this node as scaling is not required");
       return FALSE;
@@ -2620,7 +2770,8 @@ preprocessor_node_foreach (GNode * node, gpointer ptr)
           "supported by preprocessor i.e. %d", MAX_ROI);
       return TRUE;
     }
-    GST_DEBUG_OBJECT (self, "Got node %p at level %d", node, priv->infer->level);
+    GST_DEBUG_OBJECT (self, "Got node %p at level %d", node,
+        priv->infer->level);
     if ((detection->bbox.width < priv->pre_proc->caps->min_width)
         || (detection->bbox.height < priv->pre_proc->caps->min_height)) {
       GST_DEBUG_OBJECT (self,
@@ -2633,10 +2784,14 @@ preprocessor_node_foreach (GNode * node, gpointer ptr)
       return FALSE;
     }
 
-    priv->pre_proc->roi.roi[priv->pre_proc->roi.nobj].x_cord = detection->bbox.x;
-    priv->pre_proc->roi.roi[priv->pre_proc->roi.nobj].y_cord = detection->bbox.y;
-    priv->pre_proc->roi.roi[priv->pre_proc->roi.nobj].width = detection->bbox.width;
-    priv->pre_proc->roi.roi[priv->pre_proc->roi.nobj].height = detection->bbox.height;
+    priv->pre_proc->roi.roi[priv->pre_proc->roi.nobj].x_cord =
+        detection->bbox.x;
+    priv->pre_proc->roi.roi[priv->pre_proc->roi.nobj].y_cord =
+        detection->bbox.y;
+    priv->pre_proc->roi.roi[priv->pre_proc->roi.nobj].width =
+        detection->bbox.width;
+    priv->pre_proc->roi.roi[priv->pre_proc->roi.nobj].height =
+        detection->bbox.height;
 
     GST_DEBUG_OBJECT (self,
         "bbox : x = %d, y = %d, width = %d, height = %d",
@@ -2650,8 +2805,9 @@ preprocessor_node_foreach (GNode * node, gpointer ptr)
 }
 
 static int32_t
-vvas_xinfer_do_pre_processing (GstVvas_XInfer * self, VvasVideoFrame * input[MAX_ROI],
-    VvasVideoFrame * output[MAX_ROI], GstBuffer * inbuf)
+vvas_xinfer_do_pre_processing (GstVvas_XInfer *self,
+    VvasVideoFrame *input[MAX_ROI], VvasVideoFrame *output[MAX_ROI],
+    GstBuffer *inbuf)
 {
   int ret;
   VvasReturnType vret;
@@ -2708,7 +2864,8 @@ vvas_xinfer_do_pre_processing (GstVvas_XInfer * self, VvasVideoFrame * input[MAX
   if (priv->infer_profiler.enabled && priv->infer_profiler.pre_proc.enabled) {
     t1 = vvas_profiler_now_us ();
     g_mutex_lock (&priv->infer_profiler.snap_lock);
-    vvas_profiler_stats_update (&priv->infer_profiler.pre_proc, priv->pre_proc->roi.nobj, t1 - t0);
+    vvas_profiler_stats_update (&priv->infer_profiler.pre_proc,
+        priv->pre_proc->roi.nobj, t1 - t0);
     g_mutex_unlock (&priv->infer_profiler.snap_lock);
   }
 
@@ -2729,24 +2886,26 @@ vvas_xinfer_do_pre_processing (GstVvas_XInfer * self, VvasVideoFrame * input[MAX
  *        from outbuf and out_vinfo
  */
 static gboolean
-vvas_xinfer_prepare_ppe_output_frame (GstVvas_XInfer * self, GstBuffer * outbuf,
-    GstVideoInfo * out_vinfo, VvasVideoFrame ** vvas_frame)
+vvas_xinfer_prepare_ppe_output_frame (GstVvas_XInfer *self, GstBuffer *outbuf,
+    GstVideoInfo *out_vinfo, VvasVideoFrame **vvas_frame)
 {
   GstVvas_XInferPrivate *priv = self->priv;
   GstMapFlags map_flags = static_cast < GstMapFlags >
-        (GST_MAP_WRITE | GST_VIDEO_FRAME_MAP_FLAG_NO_REF);;
+      (GST_MAP_WRITE | GST_VIDEO_FRAME_MAP_FLAG_NO_REF);;
 
   if (priv->infer->input_tensor_format != VVAS_VIDEO_FORMAT_UNKNOWN) {
     *vvas_frame =
-        vvas_videoframe_from_gstbuffer_with_vvas_video_format (priv->pre_proc->vvas_ctx,
-          priv->pre_proc->out_mem_bank, outbuf, out_vinfo, priv->infer->input_tensor_format, map_flags);
+        vvas_videoframe_from_gstbuffer_with_vvas_video_format (priv->
+        pre_proc->vvas_ctx, priv->pre_proc->out_mem_bank, outbuf, out_vinfo,
+        priv->infer->input_tensor_format, map_flags);
   } else {
     *vvas_frame =
         vvas_videoframe_from_gstbuffer (priv->pre_proc->vvas_ctx,
-          priv->pre_proc->out_mem_bank, outbuf, out_vinfo, map_flags);
+        priv->pre_proc->out_mem_bank, outbuf, out_vinfo, map_flags);
   }
   if (!*vvas_frame) {
-    GST_ERROR_OBJECT (self, "failed to create vvas frame from ppe output frame");
+    GST_ERROR_OBJECT (self,
+        "failed to create vvas frame from ppe output frame");
     goto error;
   }
   GST_DEBUG_OBJECT (self, "successfully prepared output vvas frame");
@@ -2757,7 +2916,8 @@ vvas_xinfer_prepare_ppe_output_frame (GstVvas_XInfer * self, GstBuffer * outbuf,
       GST_ERROR_OBJECT (self, "failed to get memory from output buffer");
       goto error;
     }
-    GST_DEBUG_OBJECT (self, "Setting VVAS_SYNC_FROM_DEVICE on output buffer memory");
+    GST_DEBUG_OBJECT (self,
+        "Setting VVAS_SYNC_FROM_DEVICE on output buffer memory");
 
     gst_vvas_memory_set_sync_flag (out_mem, VVAS_SYNC_FROM_DEVICE);
     gst_memory_unref (out_mem);
@@ -2789,6 +2949,7 @@ static gpointer
 vvas_xinfer_ppe_loop (gpointer data)
 {
   GstVvas_XInfer *self = GST_VVAS_XINFER (data);
+  gst_vvas_log_bridge_attach_thread (GST_OBJECT (self));
   GstVvas_XInferPrivate *priv = self->priv;
   VvasCoreModule *ppe_handle = priv->pre_proc->core_handle;
   GstVvasUsrMeta *gst_usrmeta = NULL;
@@ -2877,7 +3038,7 @@ vvas_xinfer_ppe_loop (gpointer data)
           GST_ERROR_OBJECT (self, "Failed to prepare infer input frame");
           if (infer_frame->internal_inbuf)
             gst_buffer_unref (infer_frame->internal_inbuf);
-          g_slice_free(Vvas_XInferFrame, infer_frame);
+          g_slice_free (Vvas_XInferFrame, infer_frame);
           gst_buffer_unref (child_buf);
           gst_video_info_free (child_vinfo);
           goto error;
@@ -2909,7 +3070,8 @@ vvas_xinfer_ppe_loop (gpointer data)
         out_frames_count = 1;
         /* acquire ppe output buffer */
         fret =
-            gst_buffer_pool_acquire_buffer (priv->pre_proc->outpool, &outbuf, NULL);
+            gst_buffer_pool_acquire_buffer (priv->pre_proc->outpool, &outbuf,
+            NULL);
         if (fret != GST_FLOW_OK) {
           GST_ERROR_OBJECT (self, "failed to allocate buffer from pool %p",
               priv->pre_proc->outpool);
@@ -2919,13 +3081,14 @@ vvas_xinfer_ppe_loop (gpointer data)
         GST_LOG_OBJECT (self, "acquired PPE output buffer %p", outbuf);
         /* copy GstVvasUsrMeta if any */
         gst_usrmeta =
-            gst_buffer_get_vvas_usr_meta ((GstBuffer *) priv->
-            pre_proc->frame->parent_buf);
+            gst_buffer_get_vvas_usr_meta ((GstBuffer *) priv->pre_proc->
+            frame->parent_buf);
         if (gst_usrmeta) {
           info = (GstMetaInfo *) ((GstMeta *) gst_usrmeta)->info;
           if (info && info->transform_func) {
             info->transform_func (outbuf, (GstMeta *) gst_usrmeta,
-                priv->pre_proc->frame->parent_buf, _gst_meta_transform_copy, NULL);
+                priv->pre_proc->frame->parent_buf, _gst_meta_transform_copy,
+                NULL);
             GST_LOG_OBJECT (self, "copy GstVvasUsrMeta %p", gst_usrmeta);
           }
         }
@@ -3003,7 +3166,8 @@ vvas_xinfer_ppe_loop (gpointer data)
 
           GST_DEBUG_OBJECT (self,
               "input buffer %p has %u in inference level %u",
-              priv->pre_proc->frame->parent_buf, sub_bufs_len, priv->infer->level);
+              priv->pre_proc->frame->parent_buf, sub_bufs_len,
+              priv->infer->level);
 
           for (oidx = 0; oidx < sub_bufs_len; oidx++) {
             GstVideoMeta *vmeta;
@@ -3116,8 +3280,10 @@ vvas_xinfer_ppe_loop (gpointer data)
 
       /* Run PPE */
       ret =
-          vvas_xinfer_do_pre_processing (self, priv->pre_proc->core_handle->input,
-          priv->pre_proc->core_handle->output, priv->pre_proc->frame->child_buf);
+          vvas_xinfer_do_pre_processing (self,
+          priv->pre_proc->core_handle->input,
+          priv->pre_proc->core_handle->output,
+          priv->pre_proc->frame->child_buf);
       if (!ret) {
         GST_ERROR_OBJECT (self, "kernel start failed");
         goto error;
@@ -3130,11 +3296,13 @@ vvas_xinfer_ppe_loop (gpointer data)
         Vvas_XInferFrame *infer_frame;
         GstBuffer *inbuf;
         /* input to inference stage */
-        VvasVideoFrame *in_vvas_frame = priv->pre_proc->core_handle->output[oidx];
+        VvasVideoFrame *in_vvas_frame =
+            priv->pre_proc->core_handle->output[oidx];
 
         infer_frame = g_slice_new0 (Vvas_XInferFrame);
         inbuf =
-            static_cast < GstBuffer * >(g_queue_pop_head (priv->pre_proc->buf_queue));
+            static_cast <
+            GstBuffer * >(g_queue_pop_head (priv->pre_proc->buf_queue));
 
         /* output of PPE will be input of inference stage */
         /* vvas_xinfer_prepare_infer_input_frame */
@@ -3147,12 +3315,15 @@ vvas_xinfer_ppe_loop (gpointer data)
             (oidx == (out_frames_count - 1)) ? TRUE : FALSE;
         infer_frame->vvas_frame = in_vvas_frame;
         infer_frame->child_buf = inbuf;
-        infer_frame->child_vinfo = gst_video_info_copy (priv->pre_proc->out_vinfo);
+        infer_frame->child_vinfo =
+            gst_video_info_copy (priv->pre_proc->out_vinfo);
         infer_frame->skip_processing = FALSE;
         infer_frame->input_roi.nobj = 1;
         infer_frame->output_roi.nobj = 1;
-        infer_frame->input_roi.roi[0] = priv->pre_proc->frame->input_roi.roi[oidx];
-        infer_frame->output_roi.roi[0] = priv->pre_proc->frame->output_roi.roi[oidx];
+        infer_frame->input_roi.roi[0] =
+            priv->pre_proc->frame->input_roi.roi[oidx];
+        infer_frame->output_roi.roi[0] =
+            priv->pre_proc->frame->output_roi.roi[oidx];
         infer_frame->use_roi_data = TRUE;
         infer_frame->tensors = NULL;
 
@@ -3220,8 +3391,10 @@ error:
    * is called later without element-level unrefs. */
   if (priv->pre_proc->buf_queue) {
     GstBuffer *leaked_buf = NULL;
-    while ((leaked_buf = static_cast<GstBuffer *>(
-            g_queue_pop_head (priv->pre_proc->buf_queue))) != NULL) {
+    while ((leaked_buf =
+            static_cast <
+            GstBuffer * >(g_queue_pop_head (priv->pre_proc->buf_queue))) !=
+        NULL) {
       gst_buffer_unref (leaked_buf);
     }
   }
@@ -3246,7 +3419,7 @@ error:
  * @brief Transform child prediction coordinate as per parent coordinates
  */
 static void
-update_child_bbox (GNode * node, gpointer data)
+update_child_bbox (GNode *node, gpointer data)
 {
   Vvas_XInferNodeInfo *node_info = (Vvas_XInferNodeInfo *) data;
   gdouble hfactor, vfactor;
@@ -3414,9 +3587,8 @@ update_child_bbox (GNode * node, gpointer data)
  * @brief Add full frame prediction metadata to parent
  */
 static gboolean
-vvas_xinfer_add_metadata_at_level_1 (GstVvas_XInfer * self,
-    GstBuffer * parent_buf, GstVideoInfo * parent_vinfo,
-    GstBuffer * infer_inbuf)
+vvas_xinfer_add_metadata_at_level_1 (GstVvas_XInfer *self,
+    GstBuffer *parent_buf, GstVideoInfo *parent_vinfo, GstBuffer *infer_inbuf)
 {
   GstInferenceMeta *parent_meta = NULL;
   GstInferenceMeta *child_meta = NULL;
@@ -3483,9 +3655,9 @@ vvas_xinfer_add_metadata_at_level_1 (GstVvas_XInfer * self,
  * @brief The function constructs GstInferencePrediction tree from the VvasInferPrediction received from core.
  */
 static void
-construct_gst_inference_tree (GstInferencePrediction * root,
-    VvasInferPrediction * core_pred, gboolean attach_tensors,
-    VvasList * tensors_list)
+construct_gst_inference_tree (GstInferencePrediction *root,
+    VvasInferPrediction *core_pred, gboolean attach_tensors,
+    VvasList *tensors_list)
 {
   VvasList *iter = NULL, *pred_nodes = NULL;
 
@@ -3516,28 +3688,33 @@ construct_gst_inference_tree (GstInferencePrediction * root,
   }
 }
 
-static std::optional<std::vector<std::vector<vart::NpuTensor>>>
-priv_create_vart_input_sw (std::shared_ptr<vart::Runner> runner,
-            vector <VvasVideoFrameMapInfo>& mapped_inputs,
-            guint batch_size)
+static
+    std::optional <
+    std::vector <
+    std::vector <
+    vart::NpuTensor >>>
+priv_create_vart_input_sw (std::shared_ptr < vart::Runner > runner,
+    vector < VvasVideoFrameMapInfo > &mapped_inputs, guint batch_size)
 {
-  std::vector<std::vector<vart::NpuTensor>> input_tensors;
+  std::vector < std::vector < vart::NpuTensor >> input_tensors;
 
   /* For now infer plugin only supports models with one input so there
-  *  is not loop over num inputs.
-  */
+   *  is not loop over num inputs.
+   */
   GST_CAT_DEBUG (GST_CAT_DEFAULT, "Vart Creating SW Inputs");
   for (guint b = 0; b < batch_size; b++) {
-    std::vector<vart::NpuTensor> input;
+    std::vector < vart::NpuTensor > input;
     try {
-      const auto &tensor_info = runner->get_tensors_info (vart::TensorDirection::INPUT,
-                         vart::TensorType::CPU)[0];
-      auto tensor = vart::NpuTensor ( tensor_info,
-        reinterpret_cast<void*>(mapped_inputs[b].planes[0].data),
-        vart::MemoryType::USER_POINTER_NON_CMA);
-    input.push_back(std::move(tensor));
-    } catch (const std::runtime_error& e) {
-      GST_ERROR("Failed to create NpuTensor: %s", e.what());
+      const auto & tensor_info =
+          runner->get_tensors_info (vart::TensorDirection::INPUT,
+          vart::TensorType::CPU)[0];
+      auto tensor = vart::NpuTensor (tensor_info,
+          reinterpret_cast < void *>(mapped_inputs[b].planes[0].data),
+          vart::MemoryType::USER_POINTER_NON_CMA);
+      input.push_back (std::move (tensor));
+    } catch (const std::runtime_error & e)
+    {
+      GST_ERROR ("Failed to create NpuTensor: %s", e.what ());
       return std::nullopt;
     }
     input_tensors.push_back (std::move (input));
@@ -3545,28 +3722,33 @@ priv_create_vart_input_sw (std::shared_ptr<vart::Runner> runner,
   return input_tensors;
 }
 
-static std::optional<std::vector<std::vector<vart::NpuTensor>>>
-priv_create_vart_input_hw (std::shared_ptr<vart::Runner> runner,
-           vector<VvasVideoFrame*>& inp_vvas_frame,
-           guint batch_size)
+static
+    std::optional <
+    std::vector <
+    std::vector <
+    vart::NpuTensor >>>
+priv_create_vart_input_hw (std::shared_ptr < vart::Runner > runner,
+    vector < VvasVideoFrame *>&inp_vvas_frame, guint batch_size)
 {
-  std::vector<std::vector<vart::NpuTensor>> input_tensors;
+  std::vector < std::vector < vart::NpuTensor >> input_tensors;
 
   /* For now infer plugin only supports models with one input so there
-  *  is not loop over num inputs.
-  */
+   *  is not loop over num inputs.
+   */
   GST_CAT_DEBUG (GST_CAT_DEFAULT, "Vart Creating HW Inputs");
   for (guint b = 0; b < batch_size; b++) {
-    std::vector<vart::NpuTensor> input;
+    std::vector < vart::NpuTensor > input;
     try {
-      const auto &tensor_info = runner->get_tensors_info (vart::TensorDirection::INPUT,
-                         vart::TensorType::HW)[0];
-      auto tensor = vart::NpuTensor ( tensor_info,
-        vvas_video_frame_get_bo (inp_vvas_frame[b]),
-        vart::MemoryType::XRT_BO);
-    input.push_back(std::move(tensor));
-    } catch (const std::runtime_error& e) {
-      GST_ERROR("Failed to create NpuTensor: %s", e.what());
+      const auto & tensor_info =
+          runner->get_tensors_info (vart::TensorDirection::INPUT,
+          vart::TensorType::HW)[0];
+      auto tensor = vart::NpuTensor (tensor_info,
+          vvas_video_frame_get_bo (inp_vvas_frame[b]),
+          vart::MemoryType::XRT_BO);
+      input.push_back (std::move (tensor));
+    } catch (const std::runtime_error & e)
+    {
+      GST_ERROR ("Failed to create NpuTensor: %s", e.what ());
       return std::nullopt;
     }
     input_tensors.push_back (std::move (input));
@@ -3574,75 +3756,90 @@ priv_create_vart_input_hw (std::shared_ptr<vart::Runner> runner,
   return input_tensors;
 }
 
-static std::optional<std::vector<std::vector<vart::NpuTensor>>>
-priv_create_vart_output_sw (std::shared_ptr<vart::Runner> runner,
-            vector <vector <VvasMemoryMapInfo>>& mapped_outputs,
-            guint batch_size, size_t num_out_tensors)
+static
+    std::optional <
+    std::vector <
+    std::vector <
+    vart::NpuTensor >>>
+priv_create_vart_output_sw (std::shared_ptr < vart::Runner > runner,
+    vector < vector < VvasMemoryMapInfo >> &mapped_outputs,
+    guint batch_size, size_t num_out_tensors)
 {
   GST_CAT_DEBUG (GST_CAT_DEFAULT, "Vart Creating SW Outputs");
-  std::vector<std::vector<vart::NpuTensor>> output_tensors;
+  std::vector < std::vector < vart::NpuTensor >> output_tensors;
   for (guint b = 0; b < batch_size; b++) {
-      std::vector<vart::NpuTensor> output;
-      for (size_t tensor_nu = 0; tensor_nu < num_out_tensors; tensor_nu++) {
-        try {
-          const auto &tensor_info = runner->get_tensors_info (vart::TensorDirection::OUTPUT,
-                              vart::TensorType::CPU)[tensor_nu];
-          auto tensor = vart::NpuTensor (tensor_info,
-            reinterpret_cast<void*>(mapped_outputs[b][tensor_nu].data),
+    std::vector < vart::NpuTensor > output;
+    for (size_t tensor_nu = 0; tensor_nu < num_out_tensors; tensor_nu++) {
+      try {
+        const auto & tensor_info =
+            runner->get_tensors_info (vart::TensorDirection::OUTPUT,
+            vart::TensorType::CPU)[tensor_nu];
+        auto tensor = vart::NpuTensor (tensor_info,
+            reinterpret_cast < void *>(mapped_outputs[b][tensor_nu].data),
             vart::MemoryType::USER_POINTER_NON_CMA);
-          output.push_back (std::move (tensor));
-        } catch (const std::runtime_error& e) {
-          GST_ERROR("Failed to create NpuTensor: %s", e.what());
-          return std::nullopt;
-        }
+        output.push_back (std::move (tensor));
+      } catch (const std::runtime_error & e)
+      {
+        GST_ERROR ("Failed to create NpuTensor: %s", e.what ());
+        return std::nullopt;
       }
-      output_tensors.push_back(std::move(output));
+    }
+    output_tensors.push_back (std::move (output));
   }
   return output_tensors;
 }
 
-static std::optional<std::vector<std::vector<vart::NpuTensor>>>
-priv_create_vart_output_hw (std::shared_ptr<vart::Runner> runner,
-            vector<vector<VvasMemory*>>& out_vvas_mem,
-            guint batch_size, size_t num_out_tensors)
+static
+    std::optional <
+    std::vector <
+    std::vector <
+    vart::NpuTensor >>>
+priv_create_vart_output_hw (std::shared_ptr < vart::Runner > runner,
+    vector < vector < VvasMemory *>>&out_vvas_mem,
+    guint batch_size, size_t num_out_tensors)
 {
   GST_CAT_DEBUG (GST_CAT_DEFAULT, "Vart Creating HW Outputs");
-  std::vector<std::vector<vart::NpuTensor>> output_tensors;
+  std::vector < std::vector < vart::NpuTensor >> output_tensors;
   for (guint b = 0; b < batch_size; b++) {
-      std::vector<vart::NpuTensor> output;
-      for (size_t tensor_nu = 0; tensor_nu < num_out_tensors; tensor_nu++) {
-        try {
-          const auto &tensor_info = runner->get_tensors_info (vart::TensorDirection::OUTPUT,
-                              vart::TensorType::HW)[tensor_nu];
-          auto tensor = vart::NpuTensor (tensor_info,
+    std::vector < vart::NpuTensor > output;
+    for (size_t tensor_nu = 0; tensor_nu < num_out_tensors; tensor_nu++) {
+      try {
+        const auto & tensor_info =
+            runner->get_tensors_info (vart::TensorDirection::OUTPUT,
+            vart::TensorType::HW)[tensor_nu];
+        auto tensor = vart::NpuTensor (tensor_info,
             vvas_memory_get_bo (out_vvas_mem[b][tensor_nu]),
             vart::MemoryType::XRT_BO);
-          output.push_back (std::move (tensor));
-        } catch (const std::runtime_error& e) {
-          GST_ERROR("Failed to create NpuTensor: %s", e.what());
-          return std::nullopt;
-        }
+        output.push_back (std::move (tensor));
+      } catch (const std::runtime_error & e)
+      {
+        GST_ERROR ("Failed to create NpuTensor: %s", e.what ());
+        return std::nullopt;
       }
-      output_tensors.push_back(std::move(output));
+    }
+    output_tensors.push_back (std::move (output));
   }
   return output_tensors;
 }
 
 static gboolean
-priv_run_vart_inference (std::shared_ptr<vart::Runner> runner,
-              std::vector<std::vector<vart::NpuTensor>>& inputs,
-              std::vector<std::vector<vart::NpuTensor>>& outputs)
+priv_run_vart_inference (std::shared_ptr < vart::Runner > runner,
+    std::vector < std::vector < vart::NpuTensor >> &inputs,
+    std::vector < std::vector < vart::NpuTensor >> &outputs)
 {
   GST_CAT_DEBUG (GST_CAT_DEFAULT, "Running model inference using VART");
 
   try {
     auto ret = runner->execute (inputs, outputs);
     if (ret != vart::StatusCode::SUCCESS) {
-      GST_ERROR("VART inference failed with status: %d", static_cast<int>(ret));
+      GST_ERROR ("VART inference failed with status: %d",
+          static_cast < int >(ret));
       return FALSE;
     }
-  } catch (const std::exception& e) {
-    GST_ERROR("VART Run() encountered an error: %s", e.what());
+  }
+  catch (const std::exception & e)
+  {
+    GST_ERROR ("VART Run() encountered an error: %s", e.what ());
     return FALSE;
   }
 
@@ -3650,55 +3847,70 @@ priv_run_vart_inference (std::shared_ptr<vart::Runner> runner,
 }
 
 
-static std::optional<std::vector<Ort::Value>>
-priv_create_onnx_input (GstVvas_XInferPrivate* priv, Ort::MemoryInfo& memory_info,
-            vector <VvasVideoFrameMapInfo>& mapped_inputs,
-            guint batch_size)
+static
+    std::optional <
+    std::vector <
+    Ort::Value >>
+priv_create_onnx_input (GstVvas_XInferPrivate *priv,
+    Ort::MemoryInfo & memory_info,
+    vector < VvasVideoFrameMapInfo > &mapped_inputs, guint batch_size)
 {
-  std::vector<Ort::Value> input_tensors;
+  std::vector < Ort::Value > input_tensors;
   for (guint b = 0; b < batch_size; b++) {
     try {
-        auto tensor = Ort::Value::CreateTensor (memory_info,
-            reinterpret_cast<void*>(mapped_inputs[b].planes[0].data),
-            priv->infer->model_config.in_tensors[0].size,
-            priv->infer->model_config.input_shapes[0].data(),
-            priv->infer->model_config.input_shapes[0].size(),
-        get_ort_tensor_data_type (priv->infer->model_config.in_tensors[0].data_type));
-      if (!tensor.IsTensor()) {
-          GST_ERROR("Failed to create input tensor");
-          return std::nullopt;
+      auto tensor = Ort::Value::CreateTensor (memory_info,
+          reinterpret_cast < void *>(mapped_inputs[b].planes[0].data),
+          priv->infer->model_config.in_tensors[0].size,
+          priv->infer->model_config.input_shapes[0].data (),
+          priv->infer->model_config.input_shapes[0].size (),
+          get_ort_tensor_data_type (priv->infer->model_config.
+              in_tensors[0].data_type));
+      if (!tensor.IsTensor ()) {
+        GST_ERROR ("Failed to create input tensor");
+        return std::nullopt;
       }
-      input_tensors.push_back(std::move(tensor));
-    } catch (const Ort::Exception& exception) {
-      GST_ERROR("OnnxRuntime CreateTensor() encountered an error: %s", exception.what());
+      input_tensors.push_back (std::move (tensor));
+    }
+    catch (const Ort::Exception & exception)
+    {
+      GST_ERROR ("OnnxRuntime CreateTensor() encountered an error: %s",
+          exception.what ());
       return std::nullopt;
     }
   }
   return input_tensors;
 }
 
-static std::optional<std::vector<Ort::Value>>
-priv_create_onnx_output (GstVvas_XInferPrivate* priv, Ort::MemoryInfo& memory_info,
-            vector <vector <VvasMemoryMapInfo>>& mapped_outputs,
-            guint batch_size, int num_out_tensors)
+static
+    std::optional <
+    std::vector <
+    Ort::Value >>
+priv_create_onnx_output (GstVvas_XInferPrivate *priv,
+    Ort::MemoryInfo & memory_info,
+    vector < vector < VvasMemoryMapInfo >> &mapped_outputs, guint batch_size,
+    int num_out_tensors)
 {
-  std::vector<Ort::Value> output_tensors;
+  std::vector < Ort::Value > output_tensors;
   for (guint b = 0; b < batch_size; b++) {
-      for (gint tensor_nu = 0; tensor_nu < num_out_tensors; tensor_nu++) {
-        try {
+    for (gint tensor_nu = 0; tensor_nu < num_out_tensors; tensor_nu++) {
+      try {
         Ort::Value tensor = Ort::Value::CreateTensor (memory_info,
-            reinterpret_cast<void*>(mapped_outputs[b][tensor_nu].data),
+            reinterpret_cast < void *>(mapped_outputs[b][tensor_nu].data),
             priv->infer->model_config.out_tensors[tensor_nu].size,
-            priv->infer->model_config.output_shapes[tensor_nu].data(),
-            priv->infer->model_config.output_shapes[tensor_nu].size(),
-            get_ort_tensor_data_type (priv->infer->model_config.out_tensors[tensor_nu].data_type));
-        if (!tensor.IsTensor()) {
-          GST_ERROR("Failed to create output tensor");
+            priv->infer->model_config.output_shapes[tensor_nu].data (),
+            priv->infer->model_config.output_shapes[tensor_nu].size (),
+            get_ort_tensor_data_type (priv->infer->
+                model_config.out_tensors[tensor_nu].data_type));
+        if (!tensor.IsTensor ()) {
+          GST_ERROR ("Failed to create output tensor");
           return std::nullopt;
         }
-        output_tensors.push_back(std::move(tensor));
-      } catch (const Ort::Exception& exception) {
-        GST_ERROR("OnnxRuntime CreateTensor() encountered an error: %s", exception.what());
+        output_tensors.push_back (std::move (tensor));
+      }
+      catch (const Ort::Exception & exception)
+      {
+        GST_ERROR ("OnnxRuntime CreateTensor() encountered an error: %s",
+            exception.what ());
         return std::nullopt;
       }
     }
@@ -3707,38 +3919,207 @@ priv_create_onnx_output (GstVvas_XInferPrivate* priv, Ort::MemoryInfo& memory_in
 }
 
 static gboolean
-priv_run_onnx_inference (GstVvas_XInferPrivate* priv,
-        std::vector<Ort::Value>& inputs,
-        std::vector<Ort::Value>& outputs)
+priv_run_onnx_inference (GstVvas_XInferPrivate *priv,
+    std::vector < Ort::Value > &inputs, std::vector < Ort::Value > &outputs)
 {
-  GST_DEBUG("Running model inference using ONNX");
+  GST_DEBUG ("Running model inference using ONNX");
   guint64 t0 = 0, t1 = 0;
   if (priv->infer_profiler.enabled) {
     t0 = vvas_profiler_now_us ();
   }
 
   try {
-    priv->infer->ort_info.session->Run(
-        Ort::RunOptions{nullptr}, priv->infer->model_config.input_names.data(),
-        inputs.data(), priv->infer->model_config.num_in_tensors,
-        priv->infer->model_config.output_names.data(), outputs.data(),
+    priv->infer->ort_info.session->Run (Ort::RunOptions {
+        nullptr}
+        , priv->infer->model_config.input_names.data (),
+        inputs.data (), priv->infer->model_config.num_in_tensors,
+        priv->infer->model_config.output_names.data (), outputs.data (),
         priv->infer->model_config.num_out_tensors);
-  } catch (const Ort::Exception& exception) {
-    GST_ERROR ("OnnxRuntime Run() encountered an error: %s", exception.what());
+  }
+  catch (const Ort::Exception & exception)
+  {
+    GST_ERROR ("OnnxRuntime Run() encountered an error: %s", exception.what ());
     return FALSE;
   }
 
   if (priv->infer_profiler.enabled) {
     t1 = vvas_profiler_now_us ();
-    g_mutex_lock(&priv->infer_profiler.snap_lock);
-    vvas_profiler_stats_update(&priv->infer_profiler.infer, priv->infer->batch_size, t1 - t0);
-    g_mutex_unlock(&priv->infer_profiler.snap_lock);
+    g_mutex_lock (&priv->infer_profiler.snap_lock);
+    vvas_profiler_stats_update (&priv->infer_profiler.infer,
+        priv->infer->batch_size, t1 - t0);
+    g_mutex_unlock (&priv->infer_profiler.snap_lock);
   }
 
   return TRUE;
 }
 
-static void vvas_xinfer_free_infer_frame (Vvas_XInferFrame *infer_frame);
+static void vvas_xinfer_free_infer_frame (Vvas_XInferFrame * infer_frame);
+
+/**
+ * @fn static void vvas_xinfer_enqueue_group_to_postprocess
+ * @param [in] self - Handle to GstVvas_XInfer
+ * @param [in] ctx - Job context whose group of frames is to be forwarded
+ *
+ * @brief Forwards a completed inference group to the Post Process thread.
+ *        For async VART, callbacks are delivered in submission order so this
+ *        also preserves output ordering. When Post Process is disabled, or the
+ *        pipeline is stopping / the Post Process thread is not running, the
+ *        group's frames (and any acquired tensors) are freed here instead so
+ *        nothing is leaked. Does not delete ctx.
+ */
+static void
+vvas_xinfer_enqueue_group_to_postprocess (GstVvas_XInfer * self,
+    InferJobContext * ctx)
+{
+  GstVvas_XInferPrivate *priv = self->priv;
+  auto free_group = [&] () {
+    for (auto * frame : ctx->group) {
+      if (!frame)
+        continue;
+      if (frame->tensors) {
+        if (priv->post_proc->tensor_pool)
+          priv->post_proc->tensor_pool->release_memories (*frame->tensors);
+        delete frame->tensors;
+        frame->tensors = nullptr;
+      }
+      vvas_xinfer_free_infer_frame (frame);
+    }
+  };
+
+  if (!priv->post_proc->enabled) {
+    GST_ELEMENT_ERROR (self, STREAM, FAILED,
+        ("Postprocessing is required for vvas_xinfer"),
+        ("A successfully created vvas_xinfer instance must have "
+         "postprocessing enabled"));
+    priv->last_fret = GST_FLOW_ERROR;
+    free_group ();
+    return;
+  }
+
+  g_mutex_lock (&priv->post_proc->lock);
+
+  if (!priv->stop && (VVAS_THREAD_RUNNING == priv->post_proc->thread_state)) {
+    while (!priv->stop &&
+        (VVAS_THREAD_RUNNING == priv->post_proc->thread_state) &&
+        (priv->post_proc->queue_length -
+            g_queue_get_length (priv->post_proc->queue)) < ctx->group.size ()) {
+      GST_DEBUG_OBJECT (self, "Waiting for free space in Post Process Queue");
+      g_cond_wait (&priv->post_proc->cond, &priv->post_proc->lock);
+      GST_DEBUG_OBJECT (self, "Post Process queue has spaces now");
+    }
+
+    if (!priv->stop && (VVAS_THREAD_RUNNING == priv->post_proc->thread_state)) {
+      for (auto * frame : ctx->group) {
+        GST_DEBUG_OBJECT (self, "Pushing frame %p, parent_buf: %p to Post Process thread",
+            frame, frame ? frame->parent_buf : nullptr);
+        g_queue_push_tail (priv->post_proc->queue, frame);
+      }
+      GST_DEBUG_OBJECT (self, "Signaling PostProcessing thread");
+      g_cond_signal (&priv->post_proc->cond);
+      g_mutex_unlock (&priv->post_proc->lock);
+    } else {
+      g_mutex_unlock (&priv->post_proc->lock);
+      /* Stop raised or Post Process stopped while waiting: free frames. */
+      free_group ();
+    }
+  } else {
+    g_mutex_unlock (&priv->post_proc->lock);
+    /* Stopping or Post Process not running: free frames to avoid leaks. */
+    free_group ();
+  }
+}
+
+/**
+ * @fn static void vvas_xinfer_unmap_job_io
+ * @param [in] self - Handle to GstVvas_XInfer
+ * @param [in] ctx - Job context holding mapped input frames and output tensors
+ *
+ * @brief Unmaps the input frames and output tensor memories that were mapped
+ *        for an inference submission. HW (zero-copy) tensors are not mapped and
+ *        hence not unmapped.
+ */
+static void
+vvas_xinfer_unmap_job_io (GstVvas_XInfer * self, InferJobContext * ctx)
+{
+  GstVvas_XInferPrivate *priv = self->priv;
+
+  for (guint b = 0; b < ctx->batch.size (); b++) {
+    /* SW-mapped output tensors (mapped only when output tensor type is CPU) */
+    if (!ctx->hw_output) {
+      priv->post_proc->tensor_pool->unmap_memories (*ctx->batch[b]->tensors,
+          ctx->mapped_outputs[b]);
+    }
+    /* SW-mapped input frames (mapped only when input tensor type is CPU) */
+    if (!ctx->hw_input) {
+      auto vret = vvas_video_frame_unmap (ctx->batch[b]->vvas_frame,
+          &ctx->mapped_inputs[b]);
+      if (VVAS_RET_SUCCESS != vret) {
+        GST_ERROR_OBJECT (self, "couldn't unmap input frame: %u", b);
+      }
+    }
+  }
+}
+
+/**
+ * @fn static void vvas_xinfer_vart_infer_finalize
+ * @param [in] self - Handle to GstVvas_XInfer
+ * @param [in] ctx - Job context for the completed VART inference
+ * @param [in] jh - Completion status of the inference job
+ *
+ * @brief Finalizes a VART inference submission: updates profiling, unmaps IO,
+ *        releases backend tensor wrappers and forwards the group to Post
+ *        Process. Used both as the execute_async completion callback and as the
+ *        inline finalize for synchronous VART. Deletes ctx. Does NOT touch
+ *        async_in_flight (that bookkeeping is handled by the caller/callback).
+ */
+static void
+vvas_xinfer_vart_infer_finalize (GstVvas_XInfer * self, InferJobContext * ctx,
+    const vart::JobHandle & jh)
+{
+  GstVvas_XInferPrivate *priv = self->priv;
+
+  if (jh.status != vart::StatusCode::SUCCESS) {
+    GST_ELEMENT_ERROR (self, STREAM, FAILED,
+        ("failed to process frame in inference."),
+        ("VART inference failed with status: %d", (int) jh.status));
+    priv->last_fret = GST_FLOW_ERROR;
+    priv->stop = TRUE;
+  } else if (priv->infer_profiler.enabled) {
+    guint64 t1 = vvas_profiler_now_us ();
+    g_mutex_lock (&priv->infer_profiler.snap_lock);
+    vvas_profiler_stats_update (&priv->infer_profiler.infer,
+        ctx->batch.size (), t1 - ctx->t0_us);
+    g_mutex_unlock (&priv->infer_profiler.snap_lock);
+  }
+
+  vvas_xinfer_unmap_job_io (self, ctx);
+
+  /* Release backend tensor wrappers. The output tensor memory itself is
+   * released back to the pool by the Post Process thread. */
+  ctx->vart_in.reset ();
+  ctx->vart_out.reset ();
+
+  vvas_xinfer_enqueue_group_to_postprocess (self, ctx);
+
+  delete ctx;
+}
+
+/**
+ * @fn static void vvas_xinfer_onnxrt_infer_finalize
+ * @param [in] self - Handle to GstVvas_XInfer
+ * @param [in] ctx - Job context for the completed ONNX inference
+ *
+ * @brief Finalizes an ONNX inference submission. ONNX inference (and its
+ *        profiling) runs synchronously before this call, so this only unmaps IO
+ *        and forwards the group to Post Process. Deletes ctx.
+ */
+static void
+vvas_xinfer_onnxrt_infer_finalize (GstVvas_XInfer * self, InferJobContext * ctx)
+{
+  vvas_xinfer_unmap_job_io (self, ctx);
+  vvas_xinfer_enqueue_group_to_postprocess (self, ctx);
+  delete ctx;
+}
 
 /**
  * @fn static gpointer vvas_xinfer_infer_loop (gpointer data)
@@ -3760,9 +4141,10 @@ static gpointer
 vvas_xinfer_infer_loop (gpointer data)
 {
   GstVvas_XInfer *self = GST_VVAS_XINFER (data);
+  gst_vvas_log_bridge_attach_thread (GST_OBJECT (self));
   GstVvas_XInferPrivate *priv = self->priv;
-  vector <Vvas_XInferFrame *> infer_frames (priv->infer->max_queue, nullptr);
-  vector <Vvas_XInferFrame *> batch_frames (priv->infer->batch_size, nullptr);
+  vector < Vvas_XInferFrame * >infer_frames (priv->infer->max_queue, nullptr);
+  vector < Vvas_XInferFrame * >batch_frames (priv->infer->batch_size, nullptr);
   guint batch_len = 0;
   guint cur_batch_size = 0;
   guint total_queued_size = 0, cur_queued_size = 0;
@@ -3771,10 +4153,10 @@ vvas_xinfer_infer_loop (gpointer data)
   VvasReturnType vret;
   bool hw_input = false;
   bool hw_output = false;
-  vector <VvasVideoFrameMapInfo> mapped_inputs;
-  vector <vector <VvasMemoryMapInfo>> mapped_outputs;
-  vector <VvasVideoFrame *> hw_inputs;
-  vector <vector <VvasMemory *> > hw_outputs;
+  vector < VvasVideoFrameMapInfo > mapped_inputs;
+  vector < vector < VvasMemoryMapInfo >> mapped_outputs;
+  vector < VvasVideoFrame * >hw_inputs;
+  vector < vector < VvasMemory * > >hw_outputs;
 
   /* Mark thread is running */
   priv->infer->thread_state = VVAS_THREAD_RUNNING;
@@ -3797,7 +4179,8 @@ vvas_xinfer_infer_loop (gpointer data)
         gint64 end_time =
             g_get_monotonic_time () +
             self->batch_timeout * G_TIME_SPAN_MILLISECOND;
-        if (!g_cond_wait_until (&priv->infer->cond, &priv->infer->lock, end_time)) {
+        if (!g_cond_wait_until (&priv->infer->cond, &priv->infer->lock,
+                end_time)) {
           GST_DEBUG_OBJECT (self,
               "Infer batch submit timeout triggered!!, batch length is %d, "
               "batch-size is %d, current batch timeout is %d (milliseconds)",
@@ -3850,11 +4233,13 @@ vvas_xinfer_infer_loop (gpointer data)
     for (idx = 0; idx < min_batch; idx++) {
       Vvas_XInferFrame *inframe = NULL;
       g_mutex_lock (&priv->infer->lock);
-      inframe = static_cast <Vvas_XInferFrame *>(g_queue_pop_head (priv->infer->batch_queue));
+      inframe =
+          static_cast <
+          Vvas_XInferFrame * >(g_queue_pop_head (priv->infer->batch_queue));
       g_mutex_unlock (&priv->infer->lock);
 
       /* Store this input buffer */
-      infer_frames [total_queued_size + idx] = inframe;
+      infer_frames[total_queued_size + idx] = inframe;
 
       cur_queued_size++;
 
@@ -3867,9 +4252,10 @@ vvas_xinfer_infer_loop (gpointer data)
            * or PPE_thread in case of level-1,
            * so metadata is not added in ppe_thread
            */
-          GstBuffer *infer_buf = inframe->child_buf ? inframe->child_buf : inframe->parent_buf;
+          GstBuffer *infer_buf =
+              inframe->child_buf ? inframe->child_buf : inframe->parent_buf;
           vvas_xinfer_add_metadata_at_level_1 (self, inframe->parent_buf,
-                inframe->parent_vinfo, infer_buf);
+              inframe->parent_vinfo, infer_buf);
         }
       } else {
         GST_LOG_OBJECT (self, "skipping frame %p from inference", inframe);
@@ -3888,7 +4274,7 @@ vvas_xinfer_infer_loop (gpointer data)
           break;
         }
       }
-    } /* close of for loop */
+    }                           /* close of for loop */
 
     total_queued_size += cur_queued_size;
 
@@ -3904,14 +4290,15 @@ vvas_xinfer_infer_loop (gpointer data)
     /* Reset for next iteration */
     timeout_triggered = FALSE;
 
-    if (cur_batch_size && priv->last_fret == GST_FLOW_OK) {
-
+    bool do_infer = (cur_batch_size && priv->last_fret == GST_FLOW_OK);
+    if (do_infer) {
       hw_input = (priv->infer->runtime == MLRuntime::VART) &&
-                             (priv->infer->vart_info.inp_tensor_type == vart::TensorType::HW);
+        (priv->infer->vart_info.inp_tensor_type == vart::TensorType::HW);
       hw_output = (priv->infer->runtime == MLRuntime::VART) &&
-                             (priv->infer->vart_info.out_tensor_type == vart::TensorType::HW);
+        (priv->infer->vart_info.out_tensor_type == vart::TensorType::HW);
 
-      GST_DEBUG_OBJECT (self, "HW_INPUT = %d, HW_OUTPUT = %d", hw_input, hw_output);
+      GST_DEBUG_OBJECT (self, "HW_INPUT = %d, HW_OUTPUT = %d", hw_input,
+          hw_output);
 
       mapped_inputs.clear ();
       mapped_inputs.resize (cur_batch_size);
@@ -3920,14 +4307,14 @@ vvas_xinfer_infer_loop (gpointer data)
       hw_inputs.clear ();
       hw_outputs.clear ();
 
-      /*Map inputs and outputs to help create input/output tensors*/
+      /*Map inputs and outputs to help create input/output tensors */
       for (guint b = 0; b < cur_batch_size; b++) {
         /* Map the inputs */
-        if(hw_input){
+        if (hw_input) {
           hw_inputs.push_back (batch_frames[b]->vvas_frame);
         } else {
           vret = vvas_video_frame_map (batch_frames[b]->vvas_frame,
-            VVAS_DATA_MAP_READ, &mapped_inputs[b]);
+              VVAS_DATA_MAP_READ, &mapped_inputs[b]);
           if (VVAS_RET_SUCCESS != vret) {
             GST_ERROR_OBJECT (self, "couldn't map input frame for reading");
             goto error;
@@ -3935,134 +4322,198 @@ vvas_xinfer_infer_loop (gpointer data)
         }
 
         /* Prepare pointers to store output tensor data */
-        batch_frames[b]->tensors = new vector <VvasMemory *>;
+        batch_frames[b]->tensors = new vector < VvasMemory * >;
         GST_DEBUG_OBJECT (self, "acquiring memory for tensors");
-        *batch_frames[b]->tensors =  priv->post_proc->tensor_pool->acquire_memories();
-        GST_DEBUG_OBJECT (self, "acquired memory for tensors: %p %p", batch_frames[b]->tensors, (*batch_frames[b]->tensors)[0]);
-        if(hw_output) {
+        *batch_frames[b]->tensors =
+            priv->post_proc->tensor_pool->acquire_memories ();
+        GST_DEBUG_OBJECT (self, "acquired memory for tensors: %p %p",
+            batch_frames[b]->tensors, (*batch_frames[b]->tensors)[0]);
+        if (hw_output) {
           hw_outputs.push_back (*(batch_frames[b]->tensors));
         } else {
           vector < VvasMemoryMapInfo > tensor_map_info =
-            priv->post_proc->tensor_pool->map_memories (*batch_frames[b]->tensors, VVAS_DATA_MAP_WRITE);
-          mapped_outputs[b] = std::move(tensor_map_info);
+              priv->post_proc->tensor_pool->
+              map_memories (*batch_frames[b]->tensors, VVAS_DATA_MAP_WRITE);
+          mapped_outputs[b] = std::move (tensor_map_info);
         }
       }
 
+      /* Create backend input/output tensors. For VART these are moved into
+        * the job context so they remain valid until the (possibly async)
+        * completion. For ONNX inference runs synchronously right here. */
+      std::optional<std::vector<std::vector<vart::NpuTensor>>> vart_in {};
+      std::optional<std::vector<std::vector<vart::NpuTensor>>> vart_out {};
+
       if(priv->infer->runtime == MLRuntime::VART){
-        std::optional<std::vector<std::vector<vart::NpuTensor>>> input_tensors {};
-        std::optional<std::vector<std::vector<vart::NpuTensor>>> output_tensors {};
         if(hw_input){
-          input_tensors = priv_create_vart_input_hw (priv->infer->vart_info.runner,
-             hw_inputs, cur_batch_size);
+          vart_in = priv_create_vart_input_hw (priv->infer->vart_info.runner,
+              hw_inputs, cur_batch_size);
         } else {
-          input_tensors = priv_create_vart_input_sw (priv->infer->vart_info.runner,
-             mapped_inputs, cur_batch_size);
+          vart_in = priv_create_vart_input_sw (priv->infer->vart_info.runner,
+              mapped_inputs, cur_batch_size);
         }
-        if(!input_tensors) {
+        if(!vart_in) {
           goto error;
         }
 
         if(hw_output){
-          output_tensors = priv_create_vart_output_hw (priv->infer->vart_info.runner,
-             hw_outputs, cur_batch_size, priv->infer->model_config.num_out_tensors);
+          vart_out = priv_create_vart_output_hw (priv->infer->vart_info.runner,
+              hw_outputs, cur_batch_size, priv->infer->model_config.num_out_tensors);
         } else {
-          output_tensors = priv_create_vart_output_sw (priv->infer->vart_info.runner,
-             mapped_outputs, cur_batch_size, priv->infer->model_config.num_out_tensors);
+          vart_out = priv_create_vart_output_sw (priv->infer->vart_info.runner,
+              mapped_outputs, cur_batch_size, priv->infer->model_config.num_out_tensors);
         }
-        if(!output_tensors) {
+        if(!vart_out) {
           goto error;
-        }
-
-        guint64 t0 = 0, t1 = 0;
-        if (priv->infer_profiler.enabled) {
-          t0 = vvas_profiler_now_us ();
-        }
-        if (!priv_run_vart_inference (priv->infer->vart_info.runner, *input_tensors, *output_tensors)){
-            goto error;
-        }
-        if (priv->infer_profiler.enabled) {
-          t1 = vvas_profiler_now_us ();
-          g_mutex_lock (&priv->infer_profiler.snap_lock);
-          vvas_profiler_stats_update (&priv->infer_profiler.infer, cur_batch_size, t1 - t0);
-          g_mutex_unlock (&priv->infer_profiler.snap_lock);
         }
       } else if (priv->infer->runtime == MLRuntime::ONNXRT) {
         Ort::MemoryInfo memory_info =
             Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
-        auto input_tensors = priv_create_onnx_input (priv, memory_info,
-             mapped_inputs, cur_batch_size);
-        if(!input_tensors)
+        auto onnx_in = priv_create_onnx_input (priv, memory_info,
+              mapped_inputs, cur_batch_size);
+        if(!onnx_in)
           goto error;
 
-         auto output_tensors = priv_create_onnx_output (priv, memory_info,
-             mapped_outputs, cur_batch_size, priv->infer->model_config.num_out_tensors);
-          if(!output_tensors)
-            goto error;
+        auto onnx_out = priv_create_onnx_output (priv, memory_info,
+              mapped_outputs, cur_batch_size, priv->infer->model_config.num_out_tensors);
+        if(!onnx_out)
+          goto error;
 
-          if (!priv_run_onnx_inference (priv, *input_tensors, *output_tensors)){
-            goto error;
-          }
-      } else {
-         GST_ERROR_OBJECT (self, "Invalid ml inference runtime");
-      }
-
-      /* Inference completed, unmap input buffers */
-      for (guint b = 0; b < cur_batch_size; b++) {
-        /* Unmap tensor memories */
-        if(!hw_input) {
-          priv->post_proc->tensor_pool->unmap_memories ( *batch_frames[b]->tensors,
-                                                 mapped_outputs[b]);
-          }
-
-        if(!hw_output) {
-          auto vret = vvas_video_frame_unmap (batch_frames[b]->vvas_frame, &mapped_inputs[b]);
-          if (VVAS_RET_SUCCESS != vret) {
-             GST_ERROR_OBJECT (self, "couldn't unmap input frame: %u", b);
-             goto error;
-          }
+        if (!priv_run_onnx_inference (priv, *onnx_in, *onnx_out)){
+          goto error;
         }
+      } else {
+          GST_ERROR_OBJECT (self, "Invalid ml inference runtime");
+          goto error;
       }
 
+      /* Build the job context; ownership of the group/batch frames, IO
+        * mappings and backend tensors transfers to ctx so the loop-local
+        * vectors can be reused for the next batch immediately. */
+      InferJobContext *ctx = new InferJobContext ();
+      ctx->hw_input = hw_input;
+      ctx->hw_output = hw_output;
+      ctx->t0_us = 0;
+      ctx->group.assign (infer_frames.begin (),
+          infer_frames.begin () + total_queued_size);
+      ctx->batch.assign (batch_frames.begin (),
+          batch_frames.begin () + cur_batch_size);
+      ctx->mapped_inputs = std::move (mapped_inputs);
+      ctx->mapped_outputs = std::move (mapped_outputs);
+      ctx->vart_in = std::move (vart_in);
+      ctx->vart_out = std::move (vart_out);
+
+      /* Detect EOS within this group so the infer thread can break after
+        * dispatch; the EOS frame itself is forwarded to Post Process. */
+      for (guint i = 0; i < total_queued_size; i++) {
+        if (infer_frames[i] && infer_frames[i]->event &&
+            GST_EVENT_TYPE (infer_frames[i]->event) == GST_EVENT_EOS) {
+          got_eos = TRUE;
+          GST_INFO_OBJECT (self,
+              "received EOS, will exit thread %" GST_PTR_FORMAT,
+              infer_frames[i]->event);
+        }
+        infer_frames[i] = nullptr;
+      }
       /* reset all entries in batch_frames to nullptr */
       fill (batch_frames.begin(), batch_frames.end(), nullptr);
-    }
 
-    if (priv->post_proc->enabled) {
-      /* Post Processing is enabled, send buffers to the Post Process thread */
-      g_mutex_lock (&priv->post_proc->lock);
+      if (priv->infer->runtime == MLRuntime::VART) {
+        if (priv->infer_profiler.enabled)
+          ctx->t0_us = vvas_profiler_now_us ();
 
-      if (!priv->stop && (VVAS_THREAD_RUNNING == priv->post_proc->thread_state)) {
+        if (priv->infer->vart_info.use_async) {
+          /* Reserve an in-flight slot before submitting so the drain
+            * barrier and the completion callback are balanced. */
+          g_mutex_lock (&priv->infer->async_lock);
+          priv->infer->async_in_flight++;
+          g_mutex_unlock (&priv->infer->async_lock);
 
-        if ((priv->post_proc->queue_length - g_queue_get_length (priv->post_proc->queue)) <
-            total_queued_size) {
-          GST_DEBUG_OBJECT (self, "Waiting for free space in Post Process Queue");
-          g_cond_wait (&priv->post_proc->cond, &priv->post_proc->lock);
-          GST_DEBUG_OBJECT (self, "Post Process queue has spaces now");
-        }
-
-        /* All frames in batch are processed, send all the queued buffers to the Post Process thread */
-        for (guint i = 0; i < total_queued_size; i++) {
-          /* Handle event */
-          if (infer_frames[i]->event) {
-            /* This frame has event */
-            if (GST_EVENT_TYPE (infer_frames[i]->event) == GST_EVENT_EOS) {
-              got_eos = TRUE;
-              /* EOS event will be sent from _sink_event() */
-              GST_INFO_OBJECT (self,
-                "received EOS, will exit thread %" GST_PTR_FORMAT, infer_frames[i]->event);
+          bool submitted = false;
+          while (!priv->stop) {
+            auto vart_callback = [self, ctx] (const vart::JobHandle & h) {
+              GstVvas_XInferPrivate *p = self->priv;
+              GST_DEBUG_OBJECT(self, "VART inference async callback recieved for job id = %u", h.job_id);
+              vvas_xinfer_vart_infer_finalize (self, ctx, h);
+              g_mutex_lock (&p->infer->async_lock);
+              if (p->infer->async_in_flight > 0)
+                p->infer->async_in_flight--;
+              g_cond_broadcast (&p->infer->async_cond);
+              g_mutex_unlock (&p->infer->async_lock);
+            };
+            auto jh = priv->infer->vart_info.runner->execute_async (
+                *ctx->vart_in, *ctx->vart_out,
+                vart_callback);
+            if (jh.status == vart::StatusCode::SUCCESS) {
+              submitted = true;
+              GST_DEBUG_OBJECT(self, "VART inference async job submitted id = %u",
+                  jh.job_id);
+              break;
+            } else if (jh.status == vart::StatusCode::RESOURCE_UNAVAILABLE) {
+              /* Transient: all execution slots busy, retry submission. */
+              GST_LOG_OBJECT (self, "async submit slots busy, retrying");
+              g_usleep (100);
+              continue;
+            } else {
+              GST_ERROR_OBJECT (self, "async submit failed with status %d",
+                  (int) jh.status);
+              break;
             }
           }
-          /* Now send infer_freames to Post Process thread */
-          GST_DEBUG_OBJECT (self, "Pushing frame %p, parent_buf: %p to Post Process thread",
-            infer_frames[i], infer_frames[i]->parent_buf);
-          g_queue_push_tail (priv->post_proc->queue, infer_frames[i]);
-          infer_frames[i] = nullptr;
+
+          if (!submitted) {
+            /* Submission failed (non-transient) or stop was raised: finalize
+              * inline with failure and release the reserved in-flight slot. */
+            vvas_xinfer_vart_infer_finalize (self, ctx,
+                vart::JobHandle {vart::StatusCode::FAILURE, 0});
+            g_mutex_lock (&priv->infer->async_lock);
+            if (priv->infer->async_in_flight > 0)
+              priv->infer->async_in_flight--;
+            g_cond_broadcast (&priv->infer->async_cond);
+            g_mutex_unlock (&priv->infer->async_lock);
+          }
+        } else {
+          auto ok = priv_run_vart_inference (priv->infer->vart_info.runner,
+              *ctx->vart_in, *ctx->vart_out);
+          vvas_xinfer_vart_infer_finalize (self, ctx,
+              vart::JobHandle {ok ? vart::StatusCode::SUCCESS :
+                  vart::StatusCode::FAILURE, 0});
         }
-        /* Inform Post Process thread */
-        GST_DEBUG_OBJECT (self, "Signaling PostProcessing thread");
-        g_cond_signal (&priv->post_proc->cond);
+      } else {
+        /* ONNX inference already ran synchronously above. */
+        vvas_xinfer_onnxrt_infer_finalize (self, ctx);
       }
-      g_mutex_unlock (&priv->post_proc->lock);
+    } else if (total_queued_size) {
+      /* No inference for this group (skip-only/event/EOS frames, or the
+        * pipeline is already in an error state). Such a group has no async
+        * job; drain any in-flight async jobs first so it cannot overtake
+        * their results, then forward it directly. */
+      InferJobContext *ctx = new InferJobContext ();
+      ctx->hw_input = false;
+      ctx->hw_output = false;
+      ctx->t0_us = 0;
+      ctx->group.assign (infer_frames.begin (),
+          infer_frames.begin () + total_queued_size);
+
+      for (guint i = 0; i < total_queued_size; i++) {
+        if (infer_frames[i] && infer_frames[i]->event &&
+            GST_EVENT_TYPE (infer_frames[i]->event) == GST_EVENT_EOS) {
+          got_eos = TRUE;
+          GST_INFO_OBJECT (self,
+              "received EOS, will exit thread %" GST_PTR_FORMAT,
+              infer_frames[i]->event);
+        }
+        infer_frames[i] = nullptr;
+      }
+      fill (batch_frames.begin(), batch_frames.end(), nullptr);
+
+      g_mutex_lock (&priv->infer->async_lock);
+      while (priv->infer->async_in_flight > 0 && !priv->stop)
+        g_cond_wait (&priv->infer->async_cond, &priv->infer->async_lock);
+      g_mutex_unlock (&priv->infer->async_lock);
+
+      vvas_xinfer_enqueue_group_to_postprocess (self, ctx);
+      delete ctx;
     }
 
     if (priv->infer->level > 1 && (batch_len - cur_queued_size > 0)) {
@@ -4083,15 +4534,25 @@ vvas_xinfer_infer_loop (gpointer data)
       GST_DEBUG_OBJECT (self, "Exiting thread because of EOS");
       break;
     }
-  } /* End of while loop */
+  }                             /* End of while loop */
 
 exit:
+  /* Wait unconditionally (even on stop/error) for all in-flight async
+   * inference jobs to complete before tearing down. Their completion callbacks
+   * reference the tensor pool, Post Process queue and this element; they must
+   * not run after the infer thread returns and resources are freed. The runner
+   * still completes already-submitted jobs, so async_in_flight reaches 0. */
+  g_mutex_lock (&priv->infer->async_lock);
+  while (priv->infer->async_in_flight > 0)
+    g_cond_wait (&priv->infer->async_cond, &priv->infer->async_lock);
+  g_mutex_unlock (&priv->infer->async_lock);
+
   priv->infer->thread_state = VVAS_THREAD_EXITED;
 
   /* Free any frames still held in local arrays that were already popped from
    * the queue (e.g. when stop is set mid-batch). These are not in any queue
    * so the stop-path cleanup in gst_vvas_xinfer_stop() won't reach them. */
-  for (auto *frame : infer_frames) {
+  for (auto * frame:infer_frames) {
     if (frame) {
       if (frame->tensors) {
         priv->post_proc->tensor_pool->release_memories (*frame->tensors);
@@ -4102,11 +4563,11 @@ exit:
     }
   }
 
-  infer_frames.clear();
-  infer_frames.shrink_to_fit();
+  infer_frames.clear ();
+  infer_frames.shrink_to_fit ();
 
-  batch_frames.clear();
-  batch_frames.shrink_to_fit();
+  batch_frames.clear ();
+  batch_frames.shrink_to_fit ();
 
   /* wake up Post Processing thread, if it is waiting */
   g_mutex_lock (&priv->post_proc->lock);
@@ -4122,15 +4583,18 @@ error:
    * to avoid leaking tensor pool memory and mapped frames on error. */
   for (guint b = 0; b < cur_batch_size; b++) {
     if (batch_frames[b] && batch_frames[b]->tensors) {
-      if (!hw_input) {
+      /* SW-mapped output tensors (mapped only when output tensor type is CPU) */
+      if (!hw_output) {
         priv->post_proc->tensor_pool->unmap_memories (
             *batch_frames[b]->tensors, mapped_outputs[b]);
       }
-      priv->post_proc->tensor_pool->release_memories (*batch_frames[b]->tensors);
+      priv->post_proc->tensor_pool->
+          release_memories (*batch_frames[b]->tensors);
       delete batch_frames[b]->tensors;
       batch_frames[b]->tensors = nullptr;
     }
-    if (!hw_output && batch_frames[b] && batch_frames[b]->vvas_frame) {
+    /* SW-mapped input frames (mapped only when input tensor type is CPU) */
+    if (!hw_input && batch_frames[b] && batch_frames[b]->vvas_frame) {
       vvas_video_frame_unmap (batch_frames[b]->vvas_frame, &mapped_inputs[b]);
     }
   }
@@ -4146,8 +4610,7 @@ error:
 
 static gboolean
 vvas_xinfer_handle_gst_metadata (GstVvas_XInfer *self,
-                                 vector <Vvas_XInferFrame *> & infer_frames,
-                                 guint num_buffers)
+    vector < Vvas_XInferFrame *>&infer_frames, guint num_buffers)
 {
   GstVvas_XInferPrivate *priv = self->priv;
 
@@ -4157,13 +4620,13 @@ vvas_xinfer_handle_gst_metadata (GstVvas_XInfer *self,
 
     if (priv->infer->level == 1) {
       if (infer_frames[idx]->parent_buf == infer_frames[idx]->child_buf)
-      continue;
+        continue;
 
       /*
-        * The parent_buf != child_buf, indicating that the parent_buf was scaled down to meet the
-        * resolution requirement of the model. The returned inference results are based on the
-        * model's resolution. Hence scale these results to match the resolution of the parent_buf
-      */
+       * The parent_buf != child_buf, indicating that the parent_buf was scaled down to meet the
+       * resolution requirement of the model. The returned inference results are based on the
+       * model's resolution. Hence scale these results to match the resolution of the parent_buf
+       */
       GstInferenceMeta *child_meta;
       Vvas_XInferNodeInfo node_info = { 0 };
       node_info.self = self;
@@ -4174,13 +4637,15 @@ vvas_xinfer_handle_gst_metadata (GstVvas_XInfer *self,
       node_info.use_roi_data = infer_frames[idx]->use_roi_data;
 
       /* child_buf received from PPE, so update metadata in parent buf */
-      child_meta = (GstInferenceMeta *) gst_buffer_get_meta (infer_frames[idx]->child_buf,
-                    gst_inference_meta_api_get_type ());
+      child_meta =
+          (GstInferenceMeta *)
+          gst_buffer_get_meta (infer_frames[idx]->child_buf,
+          gst_inference_meta_api_get_type ());
       if (!child_meta)
         continue;
       if (!g_node_n_children ((GNode *) child_meta->prediction->
               prediction.node))
-      continue;
+        continue;
 
       GST_DEBUG_OBJECT (self, "number of children: %u",
           g_node_n_children ((GNode *) child_meta->prediction->
@@ -4188,8 +4653,7 @@ vvas_xinfer_handle_gst_metadata (GstVvas_XInfer *self,
 
       /*scale child prediction to match with parent */
       g_node_children_foreach ((GNode *) child_meta->prediction->
-          prediction.node, G_TRAVERSE_ALL, update_child_bbox,
-          &node_info);
+          prediction.node, G_TRAVERSE_ALL, update_child_bbox, &node_info);
 
       if (!gst_buffer_is_writable (infer_frames[idx]->parent_buf)) {
         GST_DEBUG_OBJECT (self, "create writable buffer of %p",
@@ -4201,7 +4665,8 @@ vvas_xinfer_handle_gst_metadata (GstVvas_XInfer *self,
 
       GstInferenceMeta *parent_meta;
       parent_meta =
-          (GstInferenceMeta *) gst_buffer_get_meta (infer_frames[idx]->parent_buf,
+          (GstInferenceMeta *)
+          gst_buffer_get_meta (infer_frames[idx]->parent_buf,
           gst_inference_meta_api_get_type ());
       if (!parent_meta) {
         GST_DEBUG_OBJECT (self, "add inference metadata to parent: %p",
@@ -4210,8 +4675,7 @@ vvas_xinfer_handle_gst_metadata (GstVvas_XInfer *self,
             gst_buffer_add_meta (infer_frames[idx]->parent_buf,
             gst_inference_meta_get_info (), NULL);
         if (!parent_meta) {
-          GST_ERROR_OBJECT (self,
-              "failed to add metadata to parent buffer");
+          GST_ERROR_OBJECT (self, "failed to add metadata to parent buffer");
           return false;
         }
         /* assigning childmeta to parent metadata prediction */
@@ -4237,7 +4701,7 @@ vvas_xinfer_handle_gst_metadata (GstVvas_XInfer *self,
             GST_META_CAST (child_meta));
         infer_frames[idx]->child_buf = NULL;
       }
-    } else {                /* inference level > 1 */
+    } else {                    /* inference level > 1 */
       GstInferenceMeta *child_meta = NULL;
       GstInferencePrediction *parent_prediction = NULL;
       Vvas_XInferNodeInfo node_info = { 0 };
@@ -4250,16 +4714,16 @@ vvas_xinfer_handle_gst_metadata (GstVvas_XInfer *self,
       node_info.use_roi_data = infer_frames[idx]->use_roi_data;
 
       child_meta =
-          (GstInferenceMeta *) gst_buffer_get_meta (infer_frames[idx]->child_buf,
+          (GstInferenceMeta *)
+          gst_buffer_get_meta (infer_frames[idx]->child_buf,
           gst_inference_meta_api_get_type ());
       if (!child_meta)
         continue;
       parent_prediction = (GstInferencePrediction *)
           child_meta->prediction->prediction.node->parent->data;
 
-      g_node_children_foreach ((GNode *) child_meta->
-          prediction->prediction.node, G_TRAVERSE_ALL, update_child_bbox,
-          &node_info);
+      g_node_children_foreach ((GNode *) child_meta->prediction->
+          prediction.node, G_TRAVERSE_ALL, update_child_bbox, &node_info);
       gst_inference_prediction_unref (parent_prediction);
       child_meta->prediction = gst_inference_prediction_new ();
     }
@@ -4312,7 +4776,8 @@ vvas_xinfer_free_infer_frame (Vvas_XInferFrame *infer_frame)
  * @detail This function sends the post processed buffer downstream and handles the flow return value
  */
 static gboolean
-vvas_xinfer_send_postprocess_buffer_downstream (GstVvas_XInfer *self, Vvas_XInferFrame *infer_frame)
+vvas_xinfer_send_postprocess_buffer_downstream (GstVvas_XInfer *self,
+    Vvas_XInferFrame *infer_frame)
 {
   GstVvas_XInferPrivate *priv = self->priv;
   GstInferenceMeta *parent_meta = NULL;
@@ -4350,8 +4815,7 @@ vvas_xinfer_send_postprocess_buffer_downstream (GstVvas_XInfer *self, Vvas_XInfe
   if (parent_meta) {
     infer_meta_str =
         gst_inference_prediction_to_string (parent_meta->prediction);
-    GST_DEBUG_OBJECT (self, "output inference metadata : %s",
-        infer_meta_str);
+    GST_DEBUG_OBJECT (self, "output inference metadata : %s", infer_meta_str);
     g_free (infer_meta_str);
 
     g_node_traverse ((GNode *) parent_meta->prediction->prediction.node,
@@ -4360,10 +4824,10 @@ vvas_xinfer_send_postprocess_buffer_downstream (GstVvas_XInfer *self, Vvas_XInfe
 #endif
   /* This is the last parent buf, it need to be sent downstream */
   GST_DEBUG_OBJECT (self, "Pushing frame %p, parent_buf: %p downstream",
-    infer_frame, infer_frame->parent_buf);
+      infer_frame, infer_frame->parent_buf);
 
   priv->last_fret = gst_pad_push (GST_BASE_TRANSFORM_SRC_PAD (self),
-        infer_frame->parent_buf);
+      infer_frame->parent_buf);
 
   if (priv->last_fret < GST_FLOW_OK) {
     switch (priv->last_fret) {
@@ -4376,7 +4840,7 @@ vvas_xinfer_send_postprocess_buffer_downstream (GstVvas_XInfer *self, Vvas_XInfe
         GST_ELEMENT_ERROR (self, STREAM, FAILED,
             ("failed to push buffer."),
             ("failed to push buffer. reason %s (%d)",
-                gst_flow_get_name (priv->last_fret), priv->last_fret.load()));
+                gst_flow_get_name (priv->last_fret), priv->last_fret.load ()));
         ret = FALSE;
         break;
     }
@@ -4399,12 +4863,17 @@ vvas_xinfer_send_postprocess_buffer_downstream (GstVvas_XInfer *self, Vvas_XInfe
  *         6. Free the memory allocated for Vvas_XInferFrame
  */
 static gpointer
-vvas_xinfer_postprocess_loop (gpointer data) {
+vvas_xinfer_postprocess_loop (gpointer data)
+{
   GstVvas_XInfer *self = GST_VVAS_XINFER (data);
+  gst_vvas_log_bridge_attach_thread (GST_OBJECT (self));
   GstVvas_XInferPrivate *priv = self->priv;
 
-  vector <Vvas_XInferFrame *> infer_frames (priv->post_proc->queue_length, nullptr);
-  vector <Vvas_XInferFrame *> postprocess_frames (priv->post_proc->queue_length, nullptr);
+  vector < Vvas_XInferFrame * >infer_frames (priv->post_proc->queue_length,
+      nullptr);
+  vector <
+      Vvas_XInferFrame * >postprocess_frames (priv->post_proc->queue_length,
+      nullptr);
 
   gboolean got_eos = FALSE;
   guint queue_length = 0;
@@ -4422,7 +4891,7 @@ vvas_xinfer_postprocess_loop (gpointer data) {
     g_mutex_lock (&priv->post_proc->lock);
 
     while (!priv->stop &&
-           !(queue_length = g_queue_get_length (priv->post_proc->queue))) {
+        !(queue_length = g_queue_get_length (priv->post_proc->queue))) {
       /* wait untill infer thread signals. */
       GST_DEBUG_OBJECT (self, "PostProcess thread waiting for frames");
       g_cond_wait (&priv->post_proc->cond, &priv->post_proc->lock);
@@ -4439,9 +4908,11 @@ vvas_xinfer_postprocess_loop (gpointer data) {
     GST_DEBUG_OBJECT (self, "PostProcess thread got %u frames", queue_length);
 
     for (guint idx = 0; idx < queue_length; idx++) {
-      infer_frames[idx] = static_cast <Vvas_XInferFrame *> (g_queue_pop_head (priv->post_proc->queue));
+      infer_frames[idx] =
+          static_cast <
+          Vvas_XInferFrame * >(g_queue_pop_head (priv->post_proc->queue));
       GST_DEBUG_OBJECT (self, "Popped frame %p, parent_buf: %p from queue",
-        infer_frames[idx], infer_frames[idx]->parent_buf);
+          infer_frames[idx], infer_frames[idx]->parent_buf);
     }
 
     /* Removed buffers from the queue, inform Infer thread if it is waiting for us */
@@ -4455,17 +4926,23 @@ vvas_xinfer_postprocess_loop (gpointer data) {
       }
     }
 
-    vector <VvasInferPrediction *> predictions (postprocess_frames_count, nullptr);
-    vector <VvasMemory *> tensors_vvas_mem (priv->infer->model_config.num_out_tensors * postprocess_frames_count, nullptr);
+    vector < VvasInferPrediction * >predictions (postprocess_frames_count,
+        nullptr);
+    vector <
+        VvasMemory *
+        >tensors_vvas_mem (priv->infer->model_config.num_out_tensors *
+        postprocess_frames_count, nullptr);
 
     if (postprocess_frames_count) {
       /* prepare data pointer for doing post processing */
-      vector < int8_t *> tensor_buf (priv->infer->model_config.num_out_tensors * postprocess_frames_count, nullptr);
+      vector <
+          int8_t * >tensor_buf (priv->infer->model_config.num_out_tensors *
+          postprocess_frames_count, nullptr);
 
       for (guint i = 0; i < postprocess_frames_count; i++) {
         for (guint j = 0; j < priv->infer->model_config.num_out_tensors; j++) {
           guint index = (i * priv->infer->model_config.num_out_tensors) + j;
-            tensors_vvas_mem[index] = postprocess_frames[i]->tensors->at(j);
+          tensors_vvas_mem[index] = postprocess_frames[i]->tensors->at (j);
         }
       }
       GST_DEBUG_OBJECT (self, "Running post processing with %u frames",
@@ -4477,18 +4954,21 @@ vvas_xinfer_postprocess_loop (gpointer data) {
       }
 
       auto vret = vvas_postprocess_tensor (priv->post_proc->handle,
-        tensors_vvas_mem.data(), postprocess_frames_count, predictions.data());
+          tensors_vvas_mem.data (), postprocess_frames_count,
+          predictions.data ());
 
       if (priv->infer_profiler.enabled) {
         t1 = vvas_profiler_now_us ();
-        g_mutex_lock(&priv->infer_profiler.snap_lock);
-        vvas_profiler_stats_update(&priv->infer_profiler.post_proc, postprocess_frames_count, t1 - t0);
-        g_mutex_unlock(&priv->infer_profiler.snap_lock);
+        g_mutex_lock (&priv->infer_profiler.snap_lock);
+        vvas_profiler_stats_update (&priv->infer_profiler.post_proc,
+            postprocess_frames_count, t1 - t0);
+        g_mutex_unlock (&priv->infer_profiler.snap_lock);
       }
 
       if (vret != VVAS_RET_SUCCESS) {
-        GST_ERROR_OBJECT (self, "vvas_postprocess_tensor failed to process frames, "
-          "ret: %d", vret);
+        GST_ERROR_OBJECT (self,
+            "vvas_postprocess_tensor failed to process frames, " "ret: %d",
+            vret);
         goto error;
       }
 
@@ -4506,8 +4986,10 @@ vvas_xinfer_postprocess_loop (gpointer data) {
         }
 
         /* Post Processing done, release tensor memory to the pool */
-        GST_DEBUG_OBJECT (self, "releasing tensor memories: %p", postprocess_frames[i]->tensors);
-        priv->post_proc->tensor_pool->release_memories (*postprocess_frames[i]->tensors);
+        GST_DEBUG_OBJECT (self, "releasing tensor memories: %p",
+            postprocess_frames[i]->tensors);
+        priv->post_proc->tensor_pool->
+            release_memories (*postprocess_frames[i]->tensors);
 
         delete postprocess_frames[i]->tensors;
         postprocess_frames[i]->tensors = nullptr;
@@ -4516,8 +4998,10 @@ vvas_xinfer_postprocess_loop (gpointer data) {
           continue;
         }
 
-        gst_buf = postprocess_frames[i]->child_buf ? postprocess_frames[i]->child_buf :
-          postprocess_frames[i]->parent_buf;
+        gst_buf =
+            postprocess_frames[i]->
+            child_buf ? postprocess_frames[i]->child_buf :
+            postprocess_frames[i]->parent_buf;
 
         gst_meta = (GstInferenceMeta *) gst_buffer_get_meta (gst_buf,
             gst_inference_meta_api_get_type ());
@@ -4556,7 +5040,8 @@ vvas_xinfer_postprocess_loop (gpointer data) {
     g_signal_emit (self, vvas_signals[SIGNAL_VVAS], 0);
 
     /* Handle GstInferenceMeta metadata */
-    auto res = vvas_xinfer_handle_gst_metadata (self, infer_frames, queue_length);
+    auto res =
+        vvas_xinfer_handle_gst_metadata (self, infer_frames, queue_length);
     if (!res) {
       GST_ERROR_OBJECT (self, "failed to handle metadata");
       goto error;
@@ -4566,7 +5051,8 @@ vvas_xinfer_postprocess_loop (gpointer data) {
     for (guint idx = 0; idx < queue_length; idx++) {
       if (infer_frames[idx]->last_parent_buf) {
         if (GST_FLOW_OK == priv->last_fret) {
-          auto ret = vvas_xinfer_send_postprocess_buffer_downstream (self, infer_frames[idx]);
+          auto ret = vvas_xinfer_send_postprocess_buffer_downstream (self,
+              infer_frames[idx]);
           if (!ret) {
             GST_ERROR_OBJECT (self, "failed to send buffer downstream");
             vvas_xinfer_free_infer_frame (infer_frames[idx]);
@@ -4575,7 +5061,8 @@ vvas_xinfer_postprocess_loop (gpointer data) {
           }
         } else {
           /* Free parent buffer */
-          GST_DEBUG_OBJECT (self, "Freeing buffer %p", infer_frames[idx]->parent_buf);
+          GST_DEBUG_OBJECT (self, "Freeing buffer %p",
+              infer_frames[idx]->parent_buf);
           gst_buffer_unref (infer_frames[idx]->parent_buf);
         }
       }
@@ -4586,10 +5073,12 @@ vvas_xinfer_postprocess_loop (gpointer data) {
           got_eos = TRUE;
           /* EOS event will be sent from _sink_event() */
           GST_INFO_OBJECT (self,
-              "received EOS, exiting thread %" GST_PTR_FORMAT, infer_frames[idx]->event);
+              "received EOS, exiting thread %" GST_PTR_FORMAT,
+              infer_frames[idx]->event);
         }
 
-        if (GST_EVENT_CUSTOM_DOWNSTREAM == GST_EVENT_TYPE (infer_frames[idx]->event)) {
+        if (GST_EVENT_CUSTOM_DOWNSTREAM ==
+            GST_EVENT_TYPE (infer_frames[idx]->event)) {
           GST_INFO_OBJECT (self,
               "received PAD-EOS, sending downstream %" GST_PTR_FORMAT,
               infer_frames[idx]->event);
@@ -4607,7 +5096,7 @@ vvas_xinfer_postprocess_loop (gpointer data) {
       GST_DEBUG_OBJECT (self, "Exiting thread because of EOS");
       break;
     }
-  } /*End of while loop */
+  }                             /*End of while loop */
 
 exit:
   priv->post_proc->thread_state = VVAS_THREAD_EXITED;
@@ -4618,8 +5107,7 @@ exit:
 
 error:
   GST_ELEMENT_ERROR (self, STREAM, FAILED,
-      ("Post Processing failed."),
-      ("Post Processing failed."));
+      ("Post Processing failed."), ("Post Processing failed."));
   priv->last_fret = GST_FLOW_ERROR;
   priv->stop = TRUE;
 
@@ -4629,7 +5117,8 @@ error:
   for (guint idx = 0; idx < postprocess_frames_count; idx++) {
     if (postprocess_frames[idx]) {
       if (postprocess_frames[idx]->tensors) {
-        priv->post_proc->tensor_pool->release_memories (*postprocess_frames[idx]->tensors);
+        priv->post_proc->
+            tensor_pool->release_memories (*postprocess_frames[idx]->tensors);
         delete postprocess_frames[idx]->tensors;
         postprocess_frames[idx]->tensors = nullptr;
       }
@@ -4672,11 +5161,11 @@ error:
  *        infer
  */
 static inline gboolean
-vvas_xinfer_send_ppe_frame (GstVvas_XInfer * self, GstBuffer * parent_buf,
-    GstVideoInfo * parent_vinfo,
-    GstBuffer * child_buf, GstVideoInfo * child_vinfo,
-    VvasVideoFrame * vvas_frame, gboolean skip_process,
-    gboolean is_first_parent, GstEvent * event)
+vvas_xinfer_send_ppe_frame (GstVvas_XInfer *self, GstBuffer *parent_buf,
+    GstVideoInfo *parent_vinfo,
+    GstBuffer *child_buf, GstVideoInfo *child_vinfo,
+    VvasVideoFrame *vvas_frame, gboolean skip_process,
+    gboolean is_first_parent, GstEvent *event)
 {
   GstVvas_XInferPrivate *priv = self->priv;
 
@@ -4743,10 +5232,11 @@ vvas_xinfer_send_ppe_frame (GstVvas_XInfer * self, GstBuffer * parent_buf,
  *
  */
 static GstFlowReturn
-gst_vvas_xinfer_submit_input_buffer (GstBaseTransform * trans,
-    gboolean is_discont, GstBuffer * inbuf)
+gst_vvas_xinfer_submit_input_buffer (GstBaseTransform *trans,
+    gboolean is_discont, GstBuffer *inbuf)
 {
   GstVvas_XInfer *self = GST_VVAS_XINFER (trans);
+  GST_VVAS_LOG_SCOPE (self);
   GstVvas_XInferPrivate *priv = self->priv;
   gboolean bret = FALSE;
   gboolean skip_preprocess = FALSE;
@@ -4765,7 +5255,7 @@ gst_vvas_xinfer_submit_input_buffer (GstBaseTransform * trans,
     return GST_FLOW_FLUSHING;
   }
 
-  if (priv->pre_proc->enabled) {    /* send frames to PPE thread */
+  if (priv->pre_proc->enabled) {        /* send frames to PPE thread */
     GstBuffer *new_inbuf = NULL;
     VvasVideoFrame *vvas_frame = NULL;
     GstInferenceMeta *parent_meta = NULL;
@@ -4774,7 +5264,7 @@ gst_vvas_xinfer_submit_input_buffer (GstBaseTransform * trans,
 
     if (priv->infer->level == 1) {
       parent_meta = (GstInferenceMeta *) gst_buffer_get_meta (inbuf,
-        gst_inference_meta_api_get_type ());
+          gst_inference_meta_api_get_type ());
       if (!parent_meta
           || !vvas_xinfer_is_sub_buffer_useful (self,
               parent_meta->prediction->sub_buffer)) {
@@ -4892,7 +5382,7 @@ gst_vvas_xinfer_submit_input_buffer (GstBaseTransform * trans,
       if (!bret) {
         if (infer_frame->internal_inbuf)
           gst_buffer_unref (infer_frame->internal_inbuf);
-        g_slice_free(Vvas_XInferFrame, infer_frame);
+        g_slice_free (Vvas_XInferFrame, infer_frame);
         if (child_vinfo)
           gst_video_info_free (child_vinfo);
         if (child_buf)
@@ -4918,7 +5408,8 @@ gst_vvas_xinfer_submit_input_buffer (GstBaseTransform * trans,
       g_mutex_unlock (&priv->infer->lock);
     }
 
-    if (g_queue_get_length (priv->infer->batch_queue) >= priv->infer->batch_size) {
+    if (g_queue_get_length (priv->infer->batch_queue) >=
+        priv->infer->batch_size) {
       g_mutex_lock (&priv->infer->lock);
       GST_LOG_OBJECT (self, "signal inference thread as queue size reached %u",
           g_queue_get_length (priv->infer->batch_queue));
@@ -4931,7 +5422,7 @@ gst_vvas_xinfer_submit_input_buffer (GstBaseTransform * trans,
 }
 
 static GstFlowReturn
-gst_vvas_xinfer_generate_output (GstBaseTransform * trans, GstBuffer ** outbuf)
+gst_vvas_xinfer_generate_output (GstBaseTransform *trans, GstBuffer **outbuf)
 {
   GstVvas_XInfer *self = GST_VVAS_XINFER (trans);
 
@@ -4953,8 +5444,8 @@ gst_vvas_xinfer_generate_output (GstBaseTransform * trans, GstBuffer ** outbuf)
  *           g_value_get_xxx API will be called to get property value from GValue handle.
  */
 static void
-gst_vvas_xinfer_set_property (GObject * object, guint prop_id,
-    const GValue * value, GParamSpec * pspec)
+gst_vvas_xinfer_set_property (GObject *object, guint prop_id,
+    const GValue *value, GParamSpec *pspec)
 {
   GstVvas_XInfer *self = GST_VVAS_XINFER (object);
 
@@ -5004,8 +5495,8 @@ gst_vvas_xinfer_set_property (GObject * object, guint prop_id,
  *	     will be called to set property value to GValue handle.
  */
 static void
-gst_vvas_xinfer_get_property (GObject * object, guint prop_id, GValue * value,
-    GParamSpec * pspec)
+gst_vvas_xinfer_get_property (GObject *object, guint prop_id, GValue *value,
+    GParamSpec *pspec)
 {
   GstVvas_XInfer *self = GST_VVAS_XINFER (object);
 
@@ -5041,7 +5532,7 @@ gst_vvas_xinfer_get_property (GObject * object, guint prop_id, GValue * value,
  *           and invokes initialization of INFER and PPE acceleration library.
  *        */
 static gboolean
-gst_vvas_xinfer_create (GstBaseTransform * trans)
+gst_vvas_xinfer_create (GstBaseTransform *trans)
 {
   GstVvas_XInfer *self = GST_VVAS_XINFER (trans);
   GstVvas_XInferPrivate *priv = self->priv;
@@ -5052,9 +5543,9 @@ gst_vvas_xinfer_create (GstBaseTransform * trans)
 
   GST_INFO_OBJECT (self, "create (instance: %s)", priv->instance_name);
 
-  priv->pre_proc = std::make_unique<PreProcessInfo> ();
-  priv->infer = std::make_unique<InferInfo> ();
-  priv->post_proc = std::make_unique<PostProcessInfo> ();
+  priv->pre_proc = std::make_unique < PreProcessInfo > ();
+  priv->infer = std::make_unique < InferInfo > ();
+  priv->post_proc = std::make_unique < PostProcessInfo > ();
 
   priv->infer->attach_empty_meta = DEFAULT_ATTACH_EMPTY_METADATA;
   priv->infer->input_class_filters = NULL;
@@ -5089,28 +5580,31 @@ gst_vvas_xinfer_create (GstBaseTransform * trans)
 
   GST_DEBUG_OBJECT (self, "Parsing preprocess-config");
 
-  bret = read_ppe_config (self, root, priv->pre_proc.get());
+  bret = read_ppe_config (self, root, priv->pre_proc.get ());
   if (!bret)
     goto error;
 
   GST_DEBUG_OBJECT (self, "Parsing Infer config");
-  bret = read_infer_config (self, root, priv->infer.get());
+  bret = read_infer_config (self, root, priv->infer.get ());
   if (!bret)
     goto error;
 
-  bret = read_postprocess_config (self, root, priv->post_proc.get());
+  bret = read_postprocess_config (self, root, priv->post_proc.get ());
   if (!bret)
     goto error;
 
   if (priv->infer->level > 1 && !priv->pre_proc->enabled) {
-    GST_ERROR_OBJECT (self, "PPE is not available, when inference-level(%d) > 1",
+    GST_ERROR_OBJECT (self,
+        "PPE is not available, when inference-level(%d) > 1",
         priv->infer->level);
     goto error;
   }
 
   if (priv->pre_proc->enabled) {
-    memset (priv->pre_proc->core_handle->input, 0x0, sizeof (VvasVideoFrame *) * MAX_ROI);
-    memset (priv->pre_proc->core_handle->output, 0x0, sizeof (VvasVideoFrame *) * MAX_ROI);
+    memset (priv->pre_proc->core_handle->input, 0x0,
+        sizeof (VvasVideoFrame *) * MAX_ROI);
+    memset (priv->pre_proc->core_handle->output, 0x0,
+        sizeof (VvasVideoFrame *) * MAX_ROI);
   }
 
   if (priv->infer_profiler.enabled) {
@@ -5127,9 +5621,12 @@ gst_vvas_xinfer_create (GstBaseTransform * trans)
     priv->infer->core_handle->init_done = TRUE;
 
     /* VART Light Runner quantization is done as part of pre-processing */
-    priv->pre_proc->param.scale_r *= priv->infer->model_config.in_tensors[0].scale_coeff;
-    priv->pre_proc->param.scale_g *= priv->infer->model_config.in_tensors[0].scale_coeff;
-    priv->pre_proc->param.scale_b *= priv->infer->model_config.in_tensors[0].scale_coeff;
+    priv->pre_proc->param.scale_r *=
+        priv->infer->model_config.in_tensors[0].scale_coeff;
+    priv->pre_proc->param.scale_g *=
+        priv->infer->model_config.in_tensors[0].scale_coeff;
+    priv->pre_proc->param.scale_b *=
+        priv->infer->model_config.in_tensors[0].scale_coeff;
 
     if (priv->pre_proc->enabled) {
       priv->pre_proc->core_handle->init_done = FALSE;
@@ -5193,8 +5690,8 @@ error:
  *  @ detail This also convert kcaps from infer kernel to GstCaps
  */
 static gboolean
-gst_vvas_xinfer_query (GstBaseTransform * trans,
-    GstPadDirection direction, GstQuery * query)
+gst_vvas_xinfer_query (GstBaseTransform *trans,
+    GstPadDirection direction, GstQuery *query)
 {
   GstVvas_XInfer *self = GST_VVAS_XINFER (trans);
   GstVvas_XInferPrivate *priv = self->priv;
@@ -5217,7 +5714,8 @@ gst_vvas_xinfer_query (GstBaseTransform * trans,
         return FALSE;
 
       gst_query_parse_caps (query, &filter);
-      GST_DEBUG_OBJECT (self, "Querying caps with filter = %" GST_PTR_FORMAT, filter);
+      GST_DEBUG_OBJECT (self, "Querying caps with filter = %" GST_PTR_FORMAT,
+          filter);
 
       /* When we are queried about our caps requirement, we should also consider the
        * pixel aspect ratio required by the downstream, this is important when
@@ -5261,8 +5759,10 @@ gst_vvas_xinfer_query (GstBaseTransform * trans,
       gst_structure_set (s, "width", G_TYPE_INT,
           priv->infer->model_config.model_width, NULL);
 
-      if(priv->pre_proc->enabled){
-        fourcc = gst_video_format_to_string (gst_coreutils_get_gst_fmt_from_vvas (priv->infer->model_format));
+      if (priv->pre_proc->enabled) {
+        fourcc =
+            gst_video_format_to_string (gst_coreutils_get_gst_fmt_from_vvas
+            (priv->infer->model_format));
         g_value_set_string (&aval, fourcc);
       } else {
         fourcc = vvas_format_to_caps_str (priv->infer->input_tensor_format);
@@ -5284,7 +5784,8 @@ gst_vvas_xinfer_query (GstBaseTransform * trans,
       gst_caps_append_structure (newcap, s);
       gst_caps_append (allcaps, newcap);
 
-      GST_DEBUG_OBJECT(self, "Appending caps created by model config %" GST_PTR_FORMAT, allcaps);
+      GST_DEBUG_OBJECT (self,
+          "Appending caps created by model config %" GST_PTR_FORMAT, allcaps);
 
       newcap = gst_caps_new_empty ();
 
@@ -5293,7 +5794,9 @@ gst_vvas_xinfer_query (GstBaseTransform * trans,
        * and set that as the range.*/
       if (priv->pre_proc->enabled) {
         /* Get image process capabilities for default library */
-        caps = vvas_image_process_get_capabilities (priv->pre_proc->core_handle->name);
+        caps =
+            vvas_image_process_get_capabilities (priv->pre_proc->
+            core_handle->name);
         if (!caps) {
           gst_caps_unref (newcap);
           gst_caps_unref (allcaps);
@@ -5305,7 +5808,8 @@ gst_vvas_xinfer_query (GstBaseTransform * trans,
       }
 
       if (!gst_caps_is_empty (newcap)) {
-        GST_DEBUG_OBJECT(self, "Appending caps added by pre-processor %" GST_PTR_FORMAT, newcap);
+        GST_DEBUG_OBJECT (self,
+            "Appending caps added by pre-processor %" GST_PTR_FORMAT, newcap);
         gst_caps_append (allcaps, newcap);
       } else {
         gst_caps_unref (newcap);
@@ -5314,7 +5818,8 @@ gst_vvas_xinfer_query (GstBaseTransform * trans,
       if (filter) {
         gchar *str = gst_caps_to_string (filter);
         gchar *s_str = gst_caps_to_string (allcaps);
-        GST_DEBUG_OBJECT (self, "supported caps: %s, filter caps = %s",s_str, str);
+        GST_DEBUG_OBJECT (self, "supported caps: %s, filter caps = %s", s_str,
+            str);
         g_free (str);
         g_free (s_str);
 
@@ -5388,9 +5893,10 @@ gst_vvas_xinfer_query (GstBaseTransform * trans,
  *  @brief Handle the GstEvent and invokes parent's event vmethod if event is not handled by xinfer
  */
 static gboolean
-gst_vvas_xinfer_sink_event (GstBaseTransform * trans, GstEvent * event)
+gst_vvas_xinfer_sink_event (GstBaseTransform *trans, GstEvent *event)
 {
   GstVvas_XInfer *self = GST_VVAS_XINFER (trans);
+  GST_VVAS_LOG_SCOPE (self);
   GstVvas_XInferPrivate *priv = self->priv;
 
   GST_LOG_OBJECT (self, "received sink event: %" GST_PTR_FORMAT, event);
@@ -5536,8 +6042,8 @@ gst_vvas_xinfer_sink_event (GstBaseTransform * trans, GstEvent * event)
  *           buffers required on query
 */
 static gboolean
-gst_vvas_xinfer_propose_allocation (GstBaseTransform * trans,
-    GstQuery * decide_query, GstQuery * query)
+gst_vvas_xinfer_propose_allocation (GstBaseTransform *trans,
+    GstQuery *decide_query, GstQuery *query)
 {
   GstVvas_XInfer *self = GST_VVAS_XINFER (trans);
   GstVvas_XInferPrivate *priv = self->priv;
@@ -5581,13 +6087,13 @@ gst_vvas_xinfer_propose_allocation (GstBaseTransform * trans,
             self->priv->pre_proc->xclbin_loc, USE_DMABUF_EXPORT,
             priv->pre_proc->in_mem_bank);
       } else if (!self->priv->pre_proc->enabled &&
-                 priv->infer->runtime == MLRuntime::VART &&
-                 priv->infer->vart_info.inp_tensor_type == vart::TensorType::HW) {
+          priv->infer->runtime == MLRuntime::VART &&
+          priv->infer->vart_info.inp_tensor_type == vart::TensorType::HW) {
         /* No preprocess, VART HW tensor — create VVAS allocator on infer
          * device so upstream can capture directly into XRT memory. */
         allocator =
             gst_vvas_allocator_new (XDNA_DEVICE_IDX, NULL, USE_DMABUF_EXPORT,
-                DEFAULT_MBANK_IDX);
+            DEFAULT_MBANK_IDX);
       } else {
         /* SW preprocess, ONNXRT, or VART CPU — system memory is fine */
         allocator = NULL;
@@ -5657,6 +6163,30 @@ gst_vvas_xinfer_propose_allocation (GstBaseTransform * trans,
 
     gst_query_parse_nth_allocation_pool (query, 0, &pool, &size, &min, &max);
 
+    /*
+     * The downstream pool still backs xinfer's HW PPE input.  Apply the
+     * stride alignment returned by the image-process library here as well as
+     * in the xinfer-created-pool path above, otherwise upstream can negotiate
+     * a pool that forces vvas_xinfer_prepare_ppe_input_frame() to copy.
+     */
+    if (priv->pre_proc->enabled && !priv->pre_proc->use_software && pool) {
+      GstStructure *pool_config = gst_buffer_pool_get_config (pool);
+
+      gst_video_alignment_reset (&align);
+      for (guint idx = 0; idx < GST_VIDEO_INFO_N_PLANES (&info); idx++)
+        align.stride_align[idx] = PPE_STRIDE_ALIGN - 1;
+
+      gst_buffer_pool_config_add_option (pool_config,
+          GST_BUFFER_POOL_OPTION_VIDEO_ALIGNMENT);
+      gst_buffer_pool_config_set_video_alignment (pool_config, &align);
+      if (!gst_buffer_pool_set_config (pool, pool_config)) {
+        GST_ERROR_OBJECT (self,
+            "failed to configure downstream allocation pool for PPE stride");
+        gst_object_unref (pool);
+        return FALSE;
+      }
+    }
+
     min += self->priv->infer->batch_size + 1;
 
     /* max value 0 indicates unlimited buffers, so do not
@@ -5711,8 +6241,8 @@ config_failed:
  *          consideration of stride requirement of image process library.
  */
 static gboolean
-gst_vvas_xinfer_set_caps (GstBaseTransform * trans, GstCaps * incaps,
-    GstCaps * outcaps)
+gst_vvas_xinfer_set_caps (GstBaseTransform *trans, GstCaps *incaps,
+    GstCaps *outcaps)
 {
   GstVvas_XInfer *self = GST_VVAS_XINFER (trans);
   gboolean bret = TRUE;
@@ -5734,7 +6264,8 @@ gst_vvas_xinfer_set_caps (GstBaseTransform * trans, GstCaps * incaps,
 
   priv->infer->pref_width = priv->infer->model_config.model_width;
   priv->infer->pref_height = priv->infer->model_config.model_height;
-  priv->infer->pref_format = gst_coreutils_get_gst_fmt_from_vvas (priv->infer->input_tensor_format);
+  priv->infer->pref_format =
+      gst_coreutils_get_gst_fmt_from_vvas (priv->infer->input_tensor_format);
   format = vvas_format_to_caps_str (priv->infer->input_tensor_format);
 
   GST_INFO_OBJECT (self,
@@ -5759,9 +6290,10 @@ gst_vvas_xinfer_set_caps (GstBaseTransform * trans, GstCaps * incaps,
     max_width = (gint32) ((((stride_align - 1) + MIN_IMAGE_PROCESS_INPUT_WIDTH +
                 (self->priv->pre_proc->caps->alignment_req.width -
                     1)) * max_scale_factor) + 1.0);
-    max_width = ALIGN (max_width, self->priv->pre_proc->caps->alignment_req.width);
+    max_width =
+        ALIGN (max_width, self->priv->pre_proc->caps->alignment_req.width);
 
-    /*3 rows on top for handling croma and 1 at bottom for even number of height*/
+    /*3 rows on top for handling croma and 1 at bottom for even number of height */
     max_scale_factor = ((gfloat) height) / MIN_IMAGE_PROCESS_INPUT_HEIGHT;
     max_height =
         (gint32) (((MIN_IMAGE_PROCESS_INPUT_HEIGHT + 4) * max_scale_factor) +
@@ -5784,13 +6316,17 @@ gst_vvas_xinfer_set_caps (GstBaseTransform * trans, GstCaps * incaps,
     }
 
     size_t pixel_size = 1;
-    if (priv->infer->model_config.in_tensors[0].data_type == VVAS_TENSOR_DATA_TYPE_FLOAT32) {
+    if (priv->infer->model_config.in_tensors[0].data_type ==
+        VVAS_TENSOR_DATA_TYPE_FLOAT32) {
       pixel_size = sizeof (float);
-    } else if (priv->infer->model_config.in_tensors[0].data_type == VVAS_TENSOR_DATA_TYPE_BF16) {
+    } else if (priv->infer->model_config.in_tensors[0].data_type ==
+        VVAS_TENSOR_DATA_TYPE_BF16) {
       pixel_size = sizeof (uint16_t);
-    } else if (priv->infer->model_config.in_tensors[0].data_type == VVAS_TENSOR_DATA_TYPE_FP16) {
+    } else if (priv->infer->model_config.in_tensors[0].data_type ==
+        VVAS_TENSOR_DATA_TYPE_FP16) {
       pixel_size = sizeof (uint16_t);
-    } else if (priv->infer->model_config.in_tensors[0].data_type == VVAS_TENSOR_DATA_TYPE_INT8) {
+    } else if (priv->infer->model_config.in_tensors[0].data_type ==
+        VVAS_TENSOR_DATA_TYPE_INT8) {
       pixel_size = sizeof (int8_t);
     } else {
       GST_ERROR_OBJECT (self, "Unsupported tensor data type");
@@ -5864,12 +6400,13 @@ gst_vvas_xinfer_set_caps (GstBaseTransform * trans, GstCaps * incaps,
           priv->pre_proc->outpool, priv->pre_proc->out_mem_bank);
 
       allocator = gst_vvas_allocator_new_and_set (self->priv->pre_proc->dev_idx,
-          self->priv->pre_proc->xclbin_loc, USE_DMABUF, priv->pre_proc->out_mem_bank,
-          priv->pre_proc->init_value);
+          self->priv->pre_proc->xclbin_loc, USE_DMABUF,
+          priv->pre_proc->out_mem_bank, priv->pre_proc->init_value);
       params.flags = GST_MEMORY_FLAG_PHYSICALLY_CONTIGUOUS;
 
       GST_LOG_OBJECT (self, "allocated preprocess output pool %" GST_PTR_FORMAT
-          "output allocator %" GST_PTR_FORMAT, priv->pre_proc->outpool, allocator);
+          "output allocator %" GST_PTR_FORMAT, priv->pre_proc->outpool,
+          allocator);
 
       structure = gst_buffer_pool_get_config (priv->pre_proc->outpool);
 
@@ -5937,14 +6474,14 @@ gst_vvas_xinfer_set_caps (GstBaseTransform * trans, GstCaps * incaps,
     }
 
     if (!gst_structure_get (structure,
-        "width", G_TYPE_INT, &in_width,
-        "height", G_TYPE_INT, &in_height, NULL)) {
+            "width", G_TYPE_INT, &in_width,
+            "height", G_TYPE_INT, &in_height, NULL)) {
       GST_ERROR_OBJECT (self, "couldn't get input width and height");
       return FALSE;
     }
 
-    if (((guint)in_width != priv->infer->pref_width) ||
-        ((guint)in_height != priv->infer->pref_height)) {
+    if (((guint) in_width != priv->infer->pref_width) ||
+        ((guint) in_height != priv->infer->pref_height)) {
       GST_ERROR_OBJECT (self, "input width and height are not acceptable"
           " for inference, expected width: %d, height: %d",
           priv->infer->pref_width, priv->infer->pref_height);
@@ -5964,7 +6501,7 @@ gst_vvas_xinfer_set_caps (GstBaseTransform * trans, GstCaps * incaps,
  *  @detail This function creates ppe and infer threads and initializes other members.
  */
 static gboolean
-gst_vvas_xinfer_start (GstBaseTransform * trans)
+gst_vvas_xinfer_start (GstBaseTransform *trans)
 {
   GstVvas_XInfer *self = GST_VVAS_XINFER (trans);
   GstVvas_XInferPrivate *priv = self->priv;
@@ -5976,6 +6513,10 @@ gst_vvas_xinfer_start (GstBaseTransform * trans)
   g_mutex_init (&priv->infer->lock);
   g_cond_init (&priv->infer->cond);
   g_cond_init (&priv->infer->batch_full);
+
+  g_mutex_init (&priv->infer->async_lock);
+  g_cond_init (&priv->infer->async_cond);
+  priv->infer->async_in_flight = 0;
 
   priv->infer->batch_queue = g_queue_new ();
   priv->infer->sub_buffers = g_queue_new ();
@@ -5991,23 +6532,26 @@ gst_vvas_xinfer_start (GstBaseTransform * trans)
   g_cond_init (&priv->pre_proc->need_input);
 
   if (priv->infer_profiler.enabled && priv->infer_profiler.log_interval > 0) {
-    g_mutex_lock(&priv->infer_profiler.snap_lock);
+    g_mutex_lock (&priv->infer_profiler.snap_lock);
     if (priv->infer_profiler.timeout_id)
-      g_source_remove(priv->infer_profiler.timeout_id);
-    priv->infer_profiler.timeout_id = g_timeout_add (priv->infer_profiler.log_interval * 1000,
+      g_source_remove (priv->infer_profiler.timeout_id);
+    priv->infer_profiler.timeout_id =
+        g_timeout_add (priv->infer_profiler.log_interval * 1000,
         vvas_infer_profiler_tick_cb, &priv->infer_profiler);
-    g_mutex_unlock(&priv->infer_profiler.snap_lock);
+    g_mutex_unlock (&priv->infer_profiler.snap_lock);
   }
 
   if (priv->pre_proc->enabled) {
     thread_name = g_strdup_printf ("ppe-thread");
-    priv->pre_proc->thread = g_thread_new (thread_name, vvas_xinfer_ppe_loop, self);
+    priv->pre_proc->thread =
+        g_thread_new (thread_name, vvas_xinfer_ppe_loop, self);
     GST_DEBUG_OBJECT (self, "ppe thread: %s created", thread_name);
     g_free (thread_name);
   }
 
   thread_name = g_strdup_printf ("infer-thread");
-  priv->infer->thread = g_thread_new (thread_name, vvas_xinfer_infer_loop, self);
+  priv->infer->thread =
+      g_thread_new (thread_name, vvas_xinfer_infer_loop, self);
   GST_DEBUG_OBJECT (self, "inference thread: %s created", thread_name);
   g_free (thread_name);
 
@@ -6021,7 +6565,8 @@ gst_vvas_xinfer_start (GstBaseTransform * trans)
     priv->post_proc->queue_length = priv->infer->max_queue;
 
     thread_name = g_strdup_printf ("postproc-thread");
-    priv->post_proc->thread = g_thread_new (thread_name, vvas_xinfer_postprocess_loop, self);
+    priv->post_proc->thread =
+        g_thread_new (thread_name, vvas_xinfer_postprocess_loop, self);
     GST_DEBUG_OBJECT (self, "postprocess thread: %s created", thread_name);
     g_free (thread_name);
   }
@@ -6044,9 +6589,9 @@ gst_vvas_xinfer_start (GstBaseTransform * trans)
 static void
 vvas_xinfer_free_xinferframe (gpointer data, gpointer user_data)
 {
-  GstVvas_XInfer *self = static_cast <GstVvas_XInfer *>(user_data);
+  GstVvas_XInfer *self = static_cast < GstVvas_XInfer * >(user_data);
   GstVvas_XInferPrivate *priv = self->priv;
-  Vvas_XInferFrame *frame = static_cast<Vvas_XInferFrame *>(data);
+  Vvas_XInferFrame *frame = static_cast < Vvas_XInferFrame * >(data);
 
   /* Release tensor pool memory if the frame was processed by the infer
    * thread but not yet consumed by the post-process thread (e.g. on stop). */
@@ -6078,12 +6623,11 @@ vvas_xinfer_free_xinferframe (gpointer data, gpointer user_data)
 
         gst_inference_prediction_unref (parent_prediction);
         /* Adding a dummy prediction instance, which will get cleared
-          * when buffer is cleaned */
+         * when buffer is cleaned */
         child_meta->prediction = gst_inference_prediction_new ();
       }
     }
-    GST_INFO_OBJECT (self, "Deinit Unreffing child buf : %p",
-        frame->child_buf);
+    GST_INFO_OBJECT (self, "Deinit Unreffing child buf : %p", frame->child_buf);
     gst_buffer_unref (frame->child_buf);
   }
   if (frame->child_vinfo)
@@ -6105,7 +6649,7 @@ vvas_xinfer_free_xinferframe (gpointer data, gpointer user_data)
  *          both thread exit. All pending buffers and pool are freed up.
  */
 static gboolean
-gst_vvas_xinfer_stop (GstBaseTransform * trans)
+gst_vvas_xinfer_stop (GstBaseTransform *trans)
 {
   GstVvas_XInfer *self = GST_VVAS_XINFER (trans);
   GstVvas_XInferPrivate *priv = self->priv;
@@ -6126,6 +6670,11 @@ gst_vvas_xinfer_stop (GstBaseTransform * trans)
     g_cond_broadcast (&self->priv->infer->batch_full);
     GST_INFO_OBJECT (self, "signalled infer thread to exit");
     g_mutex_unlock (&self->priv->infer->lock);
+
+    /* Wake the infer thread if it is parked on the async drain barrier. */
+    g_mutex_lock (&self->priv->infer->async_lock);
+    g_cond_broadcast (&self->priv->infer->async_cond);
+    g_mutex_unlock (&self->priv->infer->async_lock);
   }
 
   if (self->priv->pre_proc->thread) {
@@ -6159,7 +6708,8 @@ gst_vvas_xinfer_stop (GstBaseTransform * trans)
   }
 
   if (self->priv->infer_profiler.enabled) {
-    vvas_infer_profiler_dump_json (&self->priv->infer_profiler, self->priv->instance_name);
+    vvas_infer_profiler_dump_json (&self->priv->infer_profiler,
+        self->priv->instance_name);
     vvas_infer_profiler_deinit (&self->priv->infer_profiler);
   }
 
@@ -6170,7 +6720,7 @@ gst_vvas_xinfer_stop (GstBaseTransform * trans)
         g_queue_get_length (priv->infer->batch_queue));
 
     g_queue_foreach (priv->infer->batch_queue,
-    static_cast<GFunc>(vvas_xinfer_free_xinferframe), self);
+        static_cast < GFunc > (vvas_xinfer_free_xinferframe), self);
 
     g_queue_free (priv->infer->batch_queue);
   }
@@ -6184,7 +6734,7 @@ gst_vvas_xinfer_stop (GstBaseTransform * trans)
           g_queue_get_length (priv->post_proc->queue));
 
       g_queue_foreach (priv->post_proc->queue,
-        static_cast<GFunc>(vvas_xinfer_free_xinferframe), self);
+          static_cast < GFunc > (vvas_xinfer_free_xinferframe), self);
 
       g_queue_free (priv->post_proc->queue);
       priv->post_proc->queue = NULL;
@@ -6197,6 +6747,9 @@ gst_vvas_xinfer_stop (GstBaseTransform * trans)
   g_mutex_clear (&priv->infer->lock);
   g_cond_clear (&priv->infer->cond);
   g_cond_clear (&priv->infer->batch_full);
+
+  g_mutex_clear (&priv->infer->async_lock);
+  g_cond_clear (&priv->infer->async_cond);
 
   /* buf inside infer->sub_buffers get freed when prediction
    * node get freed, so here just remove the queue */
@@ -6222,7 +6775,8 @@ gst_vvas_xinfer_stop (GstBaseTransform * trans)
     g_slice_free1 (sizeof (Vvas_XInferFrame), priv->pre_proc->frame);
   }
 
-  if (priv->pre_proc->outpool && gst_buffer_pool_is_active (priv->pre_proc->outpool)) {
+  if (priv->pre_proc->outpool
+      && gst_buffer_pool_is_active (priv->pre_proc->outpool)) {
     if (!gst_buffer_pool_set_active (priv->pre_proc->outpool, FALSE)) {
       GST_ERROR_OBJECT (self, "failed to deactivate preprocess output pool");
       GST_ELEMENT_ERROR (self, STREAM, FAILED, ("failed to deactivate pool."),
@@ -6256,7 +6810,9 @@ gst_vvas_xinfer_stop (GstBaseTransform * trans)
 
   if (priv->pre_proc->buf_queue) {
     GstBuffer *buf;
-    while ((buf = (GstBuffer *) g_queue_pop_head (priv->pre_proc->buf_queue)) != NULL) {
+    while ((buf =
+            (GstBuffer *) g_queue_pop_head (priv->pre_proc->buf_queue)) !=
+        NULL) {
       gst_buffer_unref (buf);
     }
     g_queue_free (priv->pre_proc->buf_queue);
@@ -6280,7 +6836,7 @@ gst_vvas_xinfer_stop (GstBaseTransform * trans)
  *  @detail This function frees resources used for infer and preprocessing libraries.
  */
 static gboolean
-gst_vvas_xinfer_destroy (GstBaseTransform * trans)
+gst_vvas_xinfer_destroy (GstBaseTransform *trans)
 {
   GstVvas_XInfer *self = GST_VVAS_XINFER (trans);
   GST_INFO_OBJECT (self, "destroy");
@@ -6312,7 +6868,7 @@ gst_vvas_xinfer_destroy (GstBaseTransform * trans)
  *         Close references to devices and free memories if any
  */
 static void
-gst_vvas_xinfer_finalize (GObject * obj)
+gst_vvas_xinfer_finalize (GObject *obj)
 {
   GstVvas_XInfer *self = GST_VVAS_XINFER (obj);
 
@@ -6329,9 +6885,10 @@ gst_vvas_xinfer_finalize (GObject * obj)
 }
 
 static GstStateChangeReturn
-gst_vvas_xinfer_change_state (GstElement * element, GstStateChange transition)
+gst_vvas_xinfer_change_state (GstElement *element, GstStateChange transition)
 {
   GstVvas_XInfer *self = GST_VVAS_XINFER (element);
+  GST_VVAS_LOG_SCOPE (self);
   GstStateChangeReturn ret;
 
   GST_DEBUG_OBJECT (self, "Got state change request: %s -> %s",
@@ -6398,7 +6955,7 @@ gst_vvas_xinfer_change_state (GstElement * element, GstStateChange transition)
  *           GStreamer state a property can be changed.
  */
 static void
-gst_vvas_xinfer_class_init (GstVvas_XInferClass * klass)
+gst_vvas_xinfer_class_init (GstVvas_XInferClass *klass)
 {
   GObjectClass *gobject_class;
   GstElementClass *gstelement_class;
@@ -6425,11 +6982,13 @@ gst_vvas_xinfer_class_init (GstVvas_XInferClass * klass)
    * be dropped when the image processing library scan succeeds.
    * Only add formats not already present in lib caps to avoid duplicates. */
   {
-    GstCaps *tensor_caps = gst_caps_from_string (
-        "video/x-raw, format=(string){RGBx, BGRx, "
-        "RGBX_BF16_C4, BGRx_BF16_C4, RGB_BF16, BGR_BF16, "
+    GstCaps *tensor_caps =
+        gst_caps_from_string ("video/x-raw, format=(string){RGBx, BGRx, "
+        "RGBX_BF16_C4, BGRX_BF16_C4, RGBX_BF16_C8, "
+        "RGB_BF16, BGR_BF16, "
         "RGB_BF16P, BGR_BF16P, "
-        "RGBX_FP16_C4, BGRx_FP16_C4, RGB_FP16, BGR_FP16, "
+        "RGBX_FP16_C4, BGRX_FP16_C4, RGBX_FP16_C8, RGBX8_C8, "
+        "RGB_FP16, BGR_FP16, "
         "RGB_FP16P, BGR_FP16P, "
         "RGB_FLOAT, BGR_FLOAT, RGB_FLOATP, BGR_FLOATP, "
         "GRAY_BF16, GRAY_FP16, GRAY_FLOAT}, "
@@ -6497,15 +7056,13 @@ gst_vvas_xinfer_class_init (GstVvas_XInferClass * klass)
       g_param_spec_uint ("profiler-log-interval",
           "Profiling log interval",
           "Interval (in seconds) for logging profiling information", 0,
-          60, 0,
-          (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS)));
+          60, 0, (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS)));
 
   g_object_class_install_property (gobject_class, PROP_PROFILER_FILE,
-    g_param_spec_string ("profiler-file",
-      "Profiler output file",
-      "Path to the file where profiling information will be written in JSON format",
-      NULL,
-      (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS)));
+      g_param_spec_string ("profiler-file",
+          "Profiler output file",
+          "Path to the file where profiling information will be written in JSON format",
+          NULL, (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS)));
 
   gst_element_class_set_details_simple (gstelement_class,
       "VVAS Inference Plugin",
@@ -6554,12 +7111,13 @@ gst_vvas_xinfer_class_init (GstVvas_XInferClass * klass)
  *          Also set pass-through and in_place mode for this filter by default
  */
 static void
-gst_vvas_xinfer_init (GstVvas_XInfer * self)
+gst_vvas_xinfer_init (GstVvas_XInfer *self)
 {
   GstBaseTransform *btrans = GST_BASE_TRANSFORM (self);
   GstVvas_XInferPrivate *priv = GST_VVAS_XINFER_PRIVATE (self);
 
-  self->priv = new (priv) GstVvas_XInferPrivate {};
+  self->priv = new (priv) GstVvas_XInferPrivate {
+  };
 
   priv->do_init = TRUE;
   priv->is_error = FALSE;
@@ -6585,8 +7143,9 @@ gst_vvas_xinfer_init (GstVvas_XInfer * self)
  *  @brief Registers xinfer plugin with GStreamer core
  */
 static gboolean
-plugin_init (GstPlugin * vvas_xinfer)
+plugin_init (GstPlugin *vvas_xinfer)
 {
+  gst_vvas_log_bridge_install ();
   return gst_element_register (vvas_xinfer, "vvas_xinfer", GST_RANK_PRIMARY,
       GST_TYPE_VVAS_XINFER);
 }

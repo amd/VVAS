@@ -45,12 +45,31 @@ infer_configs = [
     'configs/infer/yoloxm_int8_onnxrt_intppe.json',
     'configs/infer/resnet50_int8_l2.json',
     'configs/infer/yoloxm_int8_vart_zerocopy.json',
+    'configs/infer/segmentation_onnxrt_intppe.json',
 ]
 
 install_data(infer_configs, install_dir : infer_config_install_dir)
 
+mipi_camera_infer_configs = [
+    'configs/infer/yoloxm_int8_vart_extppe.json',
+    'configs/infer/yoloxm_int8_vart_extppe_column0.json',
+    'configs/infer/yoloxm_int8_vart_extppe_column4.json',
+    'configs/infer/yoloxm_int8_vart_extppe_column8.json',
+    'configs/infer/yoloxm_int8_vart_extppe_column12.json',
+    'configs/infer/resnet50_int8_vart_extppe.json',
+    'configs/infer/resnet50_int8_vart_extppe_column0.json',
+    'configs/infer/resnet50_int8_vart_extppe_column4.json',
+    'configs/infer/resnet50_int8_vart_extppe_column8.json',
+    'configs/infer/resnet50_int8_vart_extppe_column12.json',
+]
+
+if get_option('mipi-camera')
+    install_data(mipi_camera_infer_configs, install_dir : infer_config_install_dir)
+endif
+
 install_data(
     'configs/metaconvert/metaconvert_config.json',
+    'configs/metaconvert/metaconvert_segmentation.json',
     install_dir : metaconvert_config_install_dir,
 )
 
@@ -67,3 +86,18 @@ install_data(example_scripts,
     install_dir : scripts_install_dir,
     install_mode : 'rwxr-xr-x',
 )
+
+if get_option('mipi-camera')
+    camera_scripts_install_dir = join_paths(scripts_install_dir, 'camera')
+    camera_scripts = [
+        'scripts/camera/camera_init_4cam.sh',
+        'scripts/camera/compute_preprocess_params.sh',
+        'scripts/camera/run_4cam_yoloxm_4kdp.sh',
+        'scripts/camera/run_4cam_resnet50_4kdp.sh',
+    ]
+
+    install_data(camera_scripts,
+        install_dir : camera_scripts_install_dir,
+        install_mode : 'rwxr-xr-x',
+    )
+endif

@@ -18,7 +18,8 @@
 foreach plugin : ['metaaffixer',
                   'metaconvert',
                   'funnel',
-                  'defunnel']
+                  'defunnel',
+                  'xtilecompositor']
   if not get_option(plugin).disabled()
     subdir(plugin)
   endif

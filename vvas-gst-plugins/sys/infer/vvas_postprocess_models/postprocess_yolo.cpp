@@ -56,7 +56,7 @@ static std::atomic<uint64_t> g_yolo_pp_frame_counter {0};
 /*
 * WARNING this profiling code if used along with START_PROFILE
 * and STOP_PROFILE macro's is only useful if there is a single
-* instance of Yolo Post processing in the application, as the 
+* instance of Yolo Post processing in the application, as the
 * profilers are stored in a static variable, do not expect sane
 * results if enabled in a process with multiple instances of
 * yolo processing.
@@ -91,9 +91,9 @@ public:
                     (m_stop_times.back() - m_start_times.back()).count();
             // Prefer *_OBJ logging so module-specific env var overrides (VVAS_CORE_DEBUG) are respected.
             if (g_yolo_pp_logger_handle) {
-                vvas_logger_log_obj(LOG_LEVEL_NONE, g_yolo_pp_logger_handle, __FILENAME__,__func__, __LINE__, "%s took %ld us", m_log.c_str(), (long)us);
+                vvas_logger_log_obj(VVAS_LOG_LEVEL_NONE, g_yolo_pp_logger_handle, __FILENAME__,__func__, __LINE__, "%s took %ld us", m_log.c_str(), (long)us);
             } else {
-                vvas_log(LOG_LEVEL_NONE, g_yolo_pp_log_level, __FILENAME__,__func__, __LINE__, "%s took %ld us", m_log.c_str(), (long)us);
+                vvas_log(VVAS_LOG_LEVEL_NONE, g_yolo_pp_log_level, __FILENAME__,__func__, __LINE__, "%s took %ld us", m_log.c_str(), (long)us);
             }
             m_durations.push_back(us);
         }
@@ -112,9 +112,9 @@ public:
         if (!m_durations.empty()) {
             auto avg = std::accumulate(m_durations.begin(), m_durations.end(), 0L) / (long)m_durations.size();
             if (g_yolo_pp_logger_handle) {
-                vvas_logger_log_obj(LOG_LEVEL_NONE, g_yolo_pp_logger_handle, __FILENAME__,__func__, __LINE__, "%s on average took %ld us", m_log.c_str(), avg);
+                vvas_logger_log_obj(VVAS_LOG_LEVEL_NONE, g_yolo_pp_logger_handle, __FILENAME__,__func__, __LINE__, "%s on average took %ld us", m_log.c_str(), avg);
             } else {
-                vvas_log(LOG_LEVEL_NONE, g_yolo_pp_log_level, __FILENAME__,__func__, __LINE__, "%s on average took %ld us", m_log.c_str(), avg);
+                vvas_log(VVAS_LOG_LEVEL_NONE, g_yolo_pp_log_level, __FILENAME__,__func__, __LINE__, "%s on average took %ld us", m_log.c_str(), avg);
             }
         }
 
@@ -241,7 +241,7 @@ read_class_labels_file(const std::string& path, VvasLogger* logger_handle)
 
     std::ifstream f(path);
     if (!f.is_open()) {
-        LOG_WARNING_OBJ(logger_handle,
+        VVAS_LOG_WARNING_OBJ(logger_handle,
                         "Failed to open class_label_file='%s' (falling back to built-in COCO labels)",
                         path.c_str());
         return labels;
@@ -258,11 +258,11 @@ read_class_labels_file(const std::string& path, VvasLogger* logger_handle)
     }
 
     if (labels.empty()) {
-        LOG_WARNING_OBJ(logger_handle,
+        VVAS_LOG_WARNING_OBJ(logger_handle,
                      "class_label_file='%s' contained no labels (falling back to built-in COCO labels)",
                      path.c_str());
     } else {
-        LOG_INFO_OBJ(logger_handle, "Loaded %zu class labels from '%s'", labels.size(), path.c_str());
+        VVAS_LOG_INFO_OBJ(logger_handle, "Loaded %zu class labels from '%s'", labels.size(), path.c_str());
     }
     return labels;
 }
@@ -357,9 +357,14 @@ BBox get_box(const T& cx, const T& cy, const T& w, const T& h, const GridAndStri
         // Cast before exp() to avoid ambiguous overloads for float16/bfloat16.
         const float wf = std::exp(static_cast<float>(w)) * static_cast<float>(gs.stride);
         const float hf = std::exp(static_cast<float>(h)) * static_cast<float>(gs.stride);
-        return BBox(Point(static_cast<float>(cx + gs.gridx * gs.stride),
-                          static_cast<float>(cy + gs.gridy * gs.stride)),
-                    wf, hf);
+        // YOLOX grid decode: the network regresses cell-relative center
+        // offsets, so the grid index must be added before scaling by stride
+        // (i.e. (offset + grid) * stride), not offset + grid * stride.
+        const float bcx = (static_cast<float>(cx) + static_cast<float>(gs.gridx)) *
+                          static_cast<float>(gs.stride);
+        const float bcy = (static_cast<float>(cy) + static_cast<float>(gs.gridy)) *
+                          static_cast<float>(gs.stride);
+        return BBox(Point(bcx, bcy), wf, hf);
     } else {
         return BBox(Point(static_cast<float>(cx), static_cast<float>(cy)),
                     static_cast<float>(w), static_cast<float>(h));
@@ -678,7 +683,7 @@ static std::vector<Detection>
         (params.apply_sigmoid ? kSigmoid : 0) |
         (params.multi_label ? kMulti : 0) |
         (params.box_grid_decode ? kDecode : 0) |
-        (params.has_objectness_score ? kObj : 0) | 
+        (params.has_objectness_score ? kObj : 0) |
         (params.transposed ? kTransposed : 0);
 
     switch (mask) {
@@ -768,7 +773,7 @@ parse_grid_strides_json(const boost::property_tree::ptree& pt, VvasLogger* logge
     if (strides.empty()) {
         throw std::runtime_error("grid_strides must contain at least one stride");
     }
-    LOG_DEBUG_OBJ(logger_handle, "grid_strides count=%zu", strides.size());
+    VVAS_LOG_DEBUG_OBJ(logger_handle, "grid_strides count=%zu", strides.size());
     return strides;
 }
 
@@ -829,7 +834,7 @@ static vector<VvasTensorInfo>
 read_tensor_info(uint32_t num_tensors, VvasTensorInfo** t_info, VvasLogger* logger_handle)
 {
     vector<VvasTensorInfo> info;
-    LOG_DEBUG_OBJ(logger_handle, "Num tensors = %u", num_tensors);
+    VVAS_LOG_DEBUG_OBJ(logger_handle, "Num tensors = %u", num_tensors);
     for(uint32_t i=0; i < num_tensors; i++){
         VvasTensorInfo& tmp = info.emplace_back();
 
@@ -846,7 +851,7 @@ read_tensor_info(uint32_t num_tensors, VvasTensorInfo** t_info, VvasLogger* logg
             shapes << tmp.shape[d] << " ";
         }
         shapes << "]";
-        LOG_DEBUG_OBJ(logger_handle,
+        VVAS_LOG_DEBUG_OBJ(logger_handle,
                       "Tensor %u :: name=%s data_type=%d size=%u scale_coeff=%f valid_shapes=%u shape=%s",
                       i, tmp.name ? tmp.name : "(null)", (int)tmp.data_type, tmp.size, tmp.scale_coeff,
                       tmp.valid_shapes, shapes.str().c_str());
@@ -868,20 +873,20 @@ read_postprocess_config(char *json_conf,
         boost::property_tree::read_json(json_stream, pt);
     } catch (const std::exception& e) {
         // Logger is not set up yet, fall back to process-wide VVAS logging.
-        LOG_ERROR(DEFAULT_VVAS_LOG_LEVEL, "Error reading JSON : %s", e.what());
+        VVAS_LOG_ERROR(DEFAULT_VVAS_LOG_LEVEL, "Error reading JSON : %s", e.what());
         throw;
     }
 
     // Create logger handle early so we can route all logs through VVAS logging.
     int json_log_level = pt.get<int>("log_level", (int)DEFAULT_VVAS_LOG_LEVEL);
-    if (json_log_level < (int)LOG_LEVEL_NONE) json_log_level = (int)LOG_LEVEL_NONE;
-    if (json_log_level > (int)LOG_LEVEL_DEBUG) json_log_level = (int)LOG_LEVEL_DEBUG;
+    if (json_log_level < (int)VVAS_LOG_LEVEL_NONE) json_log_level = (int)VVAS_LOG_LEVEL_NONE;
+    if (json_log_level > (int)VVAS_LOG_LEVEL_DEBUG) json_log_level = (int)VVAS_LOG_LEVEL_DEBUG;
     log_level = (VvasLogLevel)json_log_level;
 
     char *module_name = nullptr;
     logger_handle = vvas_logger_register(CORE_POST_PROCESS, log_level, &module_name);
     if (!logger_handle) {
-        LOG_ERROR(log_level, "Failed to register YOLO postprocess with VVAS logger");
+        VVAS_LOG_ERROR(log_level, "Failed to register YOLO postprocess with VVAS logger");
         throw std::runtime_error("vvas_logger_register failed");
     }
     g_yolo_pp_log_level = vvas_logger_get_log_level(logger_handle);
@@ -896,7 +901,7 @@ read_postprocess_config(char *json_conf,
 
     if (auto preset_opt = pt.get_optional<std::string>("preset")) {
         apply_yolo_preset(*preset_opt, params);
-        LOG_INFO_OBJ(logger_handle, "Applied YOLO preset '%s'", params.preset.c_str());
+        VVAS_LOG_INFO_OBJ(logger_handle, "Applied YOLO preset '%s'", params.preset.c_str());
     }
 
     if (auto v = pt.get_optional<bool>("box_grid_decode")) {
@@ -923,24 +928,24 @@ read_postprocess_config(char *json_conf,
 
     validate_postprocess_params(params);
 
-    LOG_DEBUG_OBJ(logger_handle, "conf_thresh=%f", params.conf_thresh);
-    LOG_DEBUG_OBJ(logger_handle, "iou_thresh=%f", params.iou_thresh);
-    LOG_DEBUG_OBJ(logger_handle, "class_agnostic=%d", (int)params.class_agnostic);
-    LOG_DEBUG_OBJ(logger_handle, "multi_label=%d", (int)params.multi_label);
-    LOG_DEBUG_OBJ(logger_handle, "box_grid_decode=%d", (int)params.box_grid_decode);
-    LOG_DEBUG_OBJ(logger_handle, "preds_per_location=%d", (int)params.preds_per_location);
-    LOG_DEBUG_OBJ(logger_handle, "apply_sigmoid=%d", (int)params.apply_sigmoid);
-    LOG_DEBUG_OBJ(logger_handle, "has_objectness_score=%d", (int)params.has_objectness_score);
-    LOG_DEBUG_OBJ(logger_handle, "max_detections=%d", (int)params.max_detections);
-    LOG_DEBUG_OBJ(logger_handle, "input_width=%d", (int)params.input_width);
-    LOG_DEBUG_OBJ(logger_handle, "input_height=%d", (int)params.input_height);
-    LOG_DEBUG_OBJ(logger_handle, "log_level=%d", (int)log_level);
+    VVAS_LOG_DEBUG_OBJ(logger_handle, "conf_thresh=%f", params.conf_thresh);
+    VVAS_LOG_DEBUG_OBJ(logger_handle, "iou_thresh=%f", params.iou_thresh);
+    VVAS_LOG_DEBUG_OBJ(logger_handle, "class_agnostic=%d", (int)params.class_agnostic);
+    VVAS_LOG_DEBUG_OBJ(logger_handle, "multi_label=%d", (int)params.multi_label);
+    VVAS_LOG_DEBUG_OBJ(logger_handle, "box_grid_decode=%d", (int)params.box_grid_decode);
+    VVAS_LOG_DEBUG_OBJ(logger_handle, "preds_per_location=%d", (int)params.preds_per_location);
+    VVAS_LOG_DEBUG_OBJ(logger_handle, "apply_sigmoid=%d", (int)params.apply_sigmoid);
+    VVAS_LOG_DEBUG_OBJ(logger_handle, "has_objectness_score=%d", (int)params.has_objectness_score);
+    VVAS_LOG_DEBUG_OBJ(logger_handle, "max_detections=%d", (int)params.max_detections);
+    VVAS_LOG_DEBUG_OBJ(logger_handle, "input_width=%d", (int)params.input_width);
+    VVAS_LOG_DEBUG_OBJ(logger_handle, "input_height=%d", (int)params.input_height);
+    VVAS_LOG_DEBUG_OBJ(logger_handle, "log_level=%d", (int)log_level);
     if (!params.preset.empty()) {
-        LOG_DEBUG_OBJ(logger_handle, "preset=%s", params.preset.c_str());
+        VVAS_LOG_DEBUG_OBJ(logger_handle, "preset=%s", params.preset.c_str());
     }
-    LOG_DEBUG_OBJ(logger_handle, "decode_strides=%s", format_strides(params.decode_strides).c_str());
+    VVAS_LOG_DEBUG_OBJ(logger_handle, "decode_strides=%s", format_strides(params.decode_strides).c_str());
     if (!class_label_file.empty()) {
-        LOG_INFO_OBJ(logger_handle, "class_label_file=%s", class_label_file.c_str());
+        VVAS_LOG_INFO_OBJ(logger_handle, "class_label_file=%s", class_label_file.c_str());
     }
 
     return params;
@@ -984,7 +989,7 @@ parse_yolo_output_shape(const VvasTensorInfo& info,
     if (dims.size() < 2) {
         std::ostringstream shapes;
         for (int32_t d = 0; d < MAX_SHAPE_SIZE; d++) shapes << info.shape[d] << " ";
-        LOG_ERROR_OBJ(logger_handle, "Invalid/unsupported shape: %s", shapes.str().c_str());
+        VVAS_LOG_ERROR_OBJ(logger_handle, "Invalid/unsupported shape: %s", shapes.str().c_str());
         return std::nullopt;
     }
 
@@ -997,7 +1002,7 @@ parse_yolo_output_shape(const VvasTensorInfo& info,
     if (attrs_dim.val < min_expected_attrs) {
         std::ostringstream shapes;
         for (int32_t d = 0; d < MAX_SHAPE_SIZE; d++) shapes << info.shape[d] << " ";
-        LOG_ERROR_OBJ(logger_handle,
+        VVAS_LOG_ERROR_OBJ(logger_handle,
                       "Unsupported attrs dimension: expected_at_least=%u got=%u (shape: %s). "
                       "If your model has different class count, update num_classes/labels accordingly.",
                       min_expected_attrs, attrs_dim.val, shapes.str().c_str());
@@ -1041,7 +1046,7 @@ void* postprocess_init(char* json_conf,
     pp_private->info = read_tensor_info(num_valid_tensors, t_info, pp_private->logger_handle);
 
     if (pp_private->info.empty()) {
-        LOG_ERROR_OBJ(pp_private->logger_handle, "No output tensor info provided");
+        VVAS_LOG_ERROR_OBJ(pp_private->logger_handle, "No output tensor info provided");
         cleanup_logger();
         return nullptr;
     }
@@ -1067,14 +1072,14 @@ void* postprocess_init(char* json_conf,
         4u + (pp_private->params.has_objectness_score ? 1u : 0u) + (uint32_t)pp_private->class_labels.size();
     auto parsed = parse_yolo_output_shape(output_tensor, expected_attrs, pp_private->logger_handle);
     if (!parsed) {
-        LOG_ERROR_OBJ(pp_private->logger_handle, "Failed to parse output tensor shape");
+        VVAS_LOG_ERROR_OBJ(pp_private->logger_handle, "Failed to parse output tensor shape");
         cleanup_logger();
         return nullptr;
     }
     pp_private->params.num_preds = parsed->num_preds;
     pp_private->params.row_stride = parsed->num_attrs;
     pp_private->params.transposed = parsed->transposed;
-    LOG_INFO_OBJ(pp_private->logger_handle,
+    VVAS_LOG_INFO_OBJ(pp_private->logger_handle,
                  "YOLO output layout: %s, num_preds=%u, num_attrs=%u (attrs_dim_index=%u preds_dim_index=%u)",
                  pp_private->params.transposed ? "[attrs,preds]" : "[preds,attrs]",
                  pp_private->params.num_preds,
@@ -1090,7 +1095,7 @@ void* postprocess_init(char* json_conf,
             pp_private->params.preds_per_location, strides);
 
         if ((uint32_t)pp_private->params.grid_strides.size() != pp_private->params.num_preds) {
-            LOG_ERROR_OBJ(pp_private->logger_handle,
+            VVAS_LOG_ERROR_OBJ(pp_private->logger_handle,
                           "Mismatch: grid_strides.size()=%zu vs num_preds=%u "
                           "(input_width=%d input_height=%d preds_per_location=%d configured_strides=%s)",
                           pp_private->params.grid_strides.size(),
@@ -1119,7 +1124,7 @@ VvasReturnType postprocess_run(void* pp_private,
         VvasMemoryMapInfo map_info = {};
         if (VVAS_RET_SUCCESS !=
             vvas_memory_map(tensor_memory[i], VVAS_DATA_MAP_READ, &map_info)) {
-            LOG_ERROR_OBJ(pp_handle->logger_handle, "Failed to map tensor memory for read");
+            VVAS_LOG_ERROR_OBJ(pp_handle->logger_handle, "Failed to map tensor memory for read");
             return VVAS_RET_ERROR;
         }
 
@@ -1147,7 +1152,7 @@ VvasReturnType postprocess_run(void* pp_private,
                 pp_handle->params.num_preds, class_labels.size(),
                 pp_handle->params.row_stride, pp_handle->params);
         } else {
-            LOG_ERROR_OBJ(pp_handle->logger_handle, "Unknown VvasTensorDataType %d", (int)pp_handle->info[0].data_type);
+            VVAS_LOG_ERROR_OBJ(pp_handle->logger_handle, "Unknown VvasTensorDataType %d", (int)pp_handle->info[0].data_type);
             vvas_memory_unmap(tensor_memory[i], &map_info);
             return VVAS_RET_ERROR;
         }
@@ -1155,14 +1160,14 @@ VvasReturnType postprocess_run(void* pp_private,
         STOP_PROFILE("postprocess_run_pptotal");
         START_PROFILE("postprocess_run_prepout", "Post process :: Results copy");
 
-        LOG_DEBUG_OBJ(pp_handle->logger_handle,
+        VVAS_LOG_DEBUG_OBJ(pp_handle->logger_handle,
                       "Frame %" PRIu64 " (batch_idx=%u): selected_boxes=%zu BEGIN",
                       frame_id, i, detections.size());
 
         size_t det_idx = 0;
         for (const auto& d : detections) {
             if (((d.box.getBR().x - d.box.getTL().x) > 0) && (d.box.getBR().y - d.box.getTL().y > 0)) {
-                LOG_DEBUG_OBJ(pp_handle->logger_handle,
+                VVAS_LOG_DEBUG_OBJ(pp_handle->logger_handle,
                               "  [%zu] cls=%d (%s) conf=%f box=[%f,%f,%f,%f] w=%f h=%f",
                               det_idx,
                               d.class_id,
@@ -1191,7 +1196,7 @@ VvasReturnType postprocess_run(void* pp_private,
                 res[i] = vvas_list_append(res[i], infer_result);
             }
         }
-        LOG_DEBUG_OBJ(pp_handle->logger_handle,
+        VVAS_LOG_DEBUG_OBJ(pp_handle->logger_handle,
                       "Frame %" PRIu64 " (batch_idx=%u): appended_boxes=%zu END",
                       frame_id, i, det_idx);
 

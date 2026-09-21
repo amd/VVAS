@@ -51,6 +51,7 @@
 #include <vvas_core/vvas_context.h>
 #include "gstvvas_xfilter.h"
 #include <gst/vvas/gstvvasutils.h>
+#include <gst/vvas/gstvvaslogbridge.h>
 
 GST_DEBUG_CATEGORY_STATIC (gst_vvas_xfilter_debug);
 #define GST_CAT_DEFAULT gst_vvas_xfilter_debug
@@ -455,14 +456,13 @@ vvas_buffer_alloc (VVASKernel *handle, VVASFrame *vvas_frame,
   if (priv_pool == NULL) {
     GstAllocator *allocator;
     GstCaps *caps;
-    gsize pool_buf_size;
+    gsize pool_buf_size, bucket_size;
     gboolean bret;
     GstAllocationParams params =
         { GST_MEMORY_FLAG_PHYSICALLY_CONTIGUOUS, 0, 0, 0 };
     GstStructure *config;
     GstVideoInfo tmp_info;
 
-    /* Note: pool sized from input caps width/height; should use nearest-pool size. */
     caps = gst_caps_new_simple ("video/x-raw",
         "format", G_TYPE_STRING,
         gst_video_format_to_string (get_gst_format (vvas_frame->props.fmt)),
@@ -477,7 +477,14 @@ vvas_buffer_alloc (VVASKernel *handle, VVASFrame *vvas_frame,
       return VVAS_RET_ERROR;
     }
 
-    pool_buf_size = GST_VIDEO_INFO_SIZE (&tmp_info);
+    /*
+     * A private pool is shared by every request in this bucket.  Size it to
+     * the bucket's upper bound, not merely this first request: a later frame
+     * in the same bucket can be larger.  Rounding the caps height can also
+     * make GST_VIDEO_INFO_SIZE() smaller than that byte-size bound.
+     */
+    bucket_size = (oidx * max_size + MAX_PRIV_POOLS - 1) / MAX_PRIV_POOLS;
+    pool_buf_size = MAX (GST_VIDEO_INFO_SIZE (&tmp_info), bucket_size);
 
     priv_pool = gst_video_buffer_pool_new ();
     pool_buf_size = ALIGN (pool_buf_size, 4096);
@@ -1049,7 +1056,7 @@ gst_vvas_xfilter_decide_allocation (GstBaseTransform *trans, GstQuery *query)
         self->priv->xclbin_loc, USE_DMABUF, vvas_handle->out_mem_bank);
 
     GST_DEBUG_OBJECT (self, "Creating new vvas allocator %p", allocator);
-    /* Note: XRT-specific allocation flags not yet advertised. */
+    params.flags = GST_MEMORY_FLAG_PHYSICALLY_CONTIGUOUS;
   }
 #ifdef XLNX_EMBEDDED_PLATFORM
 next:
@@ -1763,7 +1770,13 @@ gst_vvas_xfilter_query (GstBaseTransform *trans,
         break;
       }
 
-      pad_index = 0;            /* Note: incoming pad number not plumbed. */
+      /*
+       * xfilter is a single-sink/single-src GstBaseTransform and the kernel
+       * caps API currently rejects non-zero pad indices.  Keep querying the
+       * sole supported kernel pad until multi-pad kernel support exists
+       * end-to-end.
+       */
+      pad_index = 0;
       kernel_pad = (kernel_pads[pad_index]);
       nu_caps = kernel_pad->nu_caps;
       kcaps = kernel_pad->kcaps;        /* Base of pad's caps */
@@ -2602,6 +2615,7 @@ gst_vvas_xfilter_submit_input_buffer (GstBaseTransform *trans,
     gboolean is_discont, GstBuffer *inbuf)
 {
   GstVvas_XFilter *self = GST_VVAS_XFILTER (trans);
+  GST_VVAS_LOG_SCOPE (self);
 
   GST_LOG_OBJECT (self, "received %" GST_PTR_FORMAT, inbuf);
 
@@ -2613,6 +2627,7 @@ static GstFlowReturn
 gst_vvas_xfilter_generate_output (GstBaseTransform *trans, GstBuffer **outbuf)
 {
   GstVvas_XFilter *self = GST_VVAS_XFILTER (trans);
+  GST_VVAS_LOG_SCOPE (self);
   GstVvas_XFilterPrivate *priv = self->priv;
   GstFlowReturn fret = GST_FLOW_OK;
   Vvas_XFilter *filter_ctx = priv->filter_ctx;
@@ -2854,6 +2869,7 @@ gst_vvas_xfilter_transform (GstBaseTransform *base, GstBuffer *inbuf,
 static gboolean
 plugin_init (GstPlugin *vvas_xfilter)
 {
+  gst_vvas_log_bridge_install ();
   return gst_element_register (vvas_xfilter, "vvas_xfilter", GST_RANK_PRIMARY,
       GST_TYPE_VVAS_XFILTER);
 }
