@@ -1,0 +1,24 @@
+{
+  "infer-config": {
+    "inference-level": 1,
+    "model-format": "RGB",
+    "inference-backend-runtime": "vart",
+    "vart-config": {
+      "vart-model-path": "/etc/vai/models/yolox_m_int8/yolox_m_int8.rai",
+      "start-column": 8,
+      "aie-columns-sharing": false
+    }
+  },
+  "postprocess-config": {
+    "library-path": "/usr/lib/libvvascore_postprocess_yolo-1.0.so",
+    "library-config": {
+      "conf_thresh": 0.35,
+      "iou_thresh": 0.3,
+      "class_agnostic": false,
+      "multi_label": false,
+      "apply_sigmoid": false,
+      "box_grid_decode": true,
+      "preds_per_location": 1
+    }
+  }
+}

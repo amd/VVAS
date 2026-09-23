@@ -1,0 +1,39 @@
+{
+    "preprocess-config": {
+        "xclbin-location": "/run/media/mmcblk0p1/x_plus_ml.xclbin",
+        "library-name": "libvvas_image_process_hw_lib.so",
+        "library-config": "{\"kernel-name\":\"image_processing:{image_processing_1}\"}",
+        "mean-r": 123.675,
+        "mean-g": 116.28,
+        "mean-b": 103.53,
+        "scale-r": 0.01712,
+        "scale-g": 0.017507,
+        "scale-b": 0.017429,
+        "in-mem-bank": 2,
+        "out-mem-bank": 2
+    },
+    "infer-config": {
+        "model-format": "RGB",
+        "inference-backend-runtime": "onnxrt",
+        "onnxrt-config": {
+            "onnx-model-path": "/dev/shm/models/segmentation/deeplabv3plus-resnet50.onnx",
+            "input-tensor-layout": "NCHW",
+            "onnxrt-ep": "vitisai",
+            "vitisai-ep-config": {
+                "config-file-path": "/dev/shm/models/segmentation/vitisai_config.json",
+                "ai-analyzer-profiling": false,
+                "cache-dir": "/dev/shm/models/segmentation",
+                "cache-key": "deeplabv3plus-resnet50"
+            }
+        }
+    },
+    "postprocess-config": {
+        "library-path": "/usr/lib/libvvascore_postprocess_vart.so",
+        "library-config": {
+            "topk": 5,
+            "type": "SOFTMAXSEG",
+            "label-file-path": "/etc/vvas/configs/infer/imagenet-classes-1000.txt",
+            "post-process-print": "false"
+        }
+    }
+}

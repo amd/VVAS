@@ -40,6 +40,13 @@ struct _PredictionScaleData
   GstVideoInfo *to;
 };
 
+typedef struct _PredictionGeometryData PredictionGeometryData;
+struct _PredictionGeometryData
+{
+  VvasInferScaleInfo scale;
+  GstVideoInfo *to;
+};
+
 typedef struct _PredictionFindData PredictionFindData;
 struct _PredictionFindData
 {
@@ -63,6 +70,8 @@ static GstInferencePrediction *prediction_scale (const GstInferencePrediction *
     self, GstVideoInfo * to, GstVideoInfo * from);
 static void prediction_scale_ip (GstInferencePrediction * self,
     GstVideoInfo * to, GstVideoInfo * from);
+static GstInferencePrediction *prediction_transform_geometry (const
+    GstInferencePrediction * self, PredictionGeometryData * data);
 static GSList *prediction_get_children_unlocked (GstInferencePrediction * self);
 static gboolean prediction_merge (GstInferencePrediction * src,
     GstInferencePrediction * dst);
@@ -564,6 +573,31 @@ prediction_scale (const GstInferencePrediction *self, GstVideoInfo *to,
   return dest;
 }
 
+static GstInferencePrediction *
+prediction_transform_geometry (const GstInferencePrediction *self,
+    PredictionGeometryData *data)
+{
+  GstInferencePrediction *dest;
+
+  dest = prediction_copy (self);
+  if (!dest)
+    return NULL;
+
+  if (dest->prediction.infer_result && dest->prediction.infer_result->transform) {
+    dest->prediction.infer_result->transform (dest->prediction.
+        infer_result->data, &data->scale);
+
+    if (dest->prediction.infer_result->infer_result_type ==
+        VVAS_INFER_RESULT_DETECTION && dest->prediction.infer_result->data) {
+      clip_detection_to_frame ((VvasInferDetection *)
+          dest->prediction.infer_result->data, data->to);
+    }
+  }
+
+  dest->prediction.scaled_to_root = TRUE;
+  return dest;
+}
+
 static void
 prediction_scale_ip (GstInferencePrediction *self, GstVideoInfo *to,
     GstVideoInfo *from)
@@ -617,6 +651,14 @@ node_scale (gconstpointer node, gpointer data)
   return prediction_scale (self, sdata->to, sdata->from);
 }
 
+static gpointer
+node_transform_geometry (gconstpointer node, gpointer data)
+{
+  const GstInferencePrediction *self = (GstInferencePrediction *) node;
+
+  return prediction_transform_geometry (self, (PredictionGeometryData *) data);
+}
+
 void
 gst_inference_prediction_scale_ip (GstInferencePrediction *self,
     GstVideoInfo *to, GstVideoInfo *from)
@@ -659,6 +701,56 @@ gst_inference_prediction_scale (GstInferencePrediction *self,
   GST_INFERENCE_PREDICTION_UNLOCK (self);
 
   return (GstInferencePrediction *) other->data;
+}
+
+GstInferencePrediction *
+gst_inference_prediction_transform_preprocess_geometry (GstInferencePrediction
+    *self, const GstVvasPreprocessGeometry *geometry, GstVideoInfo *to)
+{
+  PredictionGeometryData data = { 0 };
+  VvasTreeNode *other;
+  gdouble hfactor;
+  gdouble vfactor;
+
+  g_return_val_if_fail (self, NULL);
+  g_return_val_if_fail (geometry, NULL);
+  g_return_val_if_fail (to, NULL);
+
+  if (geometry->abi_version != GST_VVAS_PREPROCESS_META_ABI_VERSION ||
+      geometry->operation == GST_VVAS_PREPROCESS_OPERATION_UNKNOWN ||
+      geometry->operation > GST_VVAS_PREPROCESS_OPERATION_PANSCAN ||
+      !geometry->source_rect.width || !geometry->source_rect.height ||
+      !geometry->destination_rect.width || !geometry->destination_rect.height) {
+    GST_WARNING ("invalid preprocessing geometry metadata");
+    return NULL;
+  }
+
+  hfactor = (gdouble) geometry->source_rect.width /
+      geometry->destination_rect.width;
+  vfactor = (gdouble) geometry->source_rect.height /
+      geometry->destination_rect.height;
+  data.scale.from_width = geometry->destination_rect.width;
+  data.scale.from_height = geometry->destination_rect.height;
+  data.scale.to_width = geometry->source_rect.width;
+  data.scale.to_height = geometry->source_rect.height;
+  data.scale.x = 0;
+  data.scale.y = 0;
+  data.scale.xOffset = geometry->source_rect.x -
+      (gint32) ((gdouble) geometry->destination_rect.x * hfactor);
+  data.scale.yOffset = geometry->source_rect.y -
+      (gint32) ((gdouble) geometry->destination_rect.y * vfactor);
+  data.to = to;
+
+  GST_INFERENCE_PREDICTION_LOCK (self);
+  other = vvas_treenode_copy_deep (self->prediction.node,
+      (vvas_treenode_copy_func) node_transform_geometry, &data);
+  if (other) {
+    vvas_treenode_traverse (other, IN_ORDER, TRAVERSE_ALL, -1,
+        (vvas_treenode_traverse_func) node_assign, NULL);
+  }
+  GST_INFERENCE_PREDICTION_UNLOCK (self);
+
+  return other ? (GstInferencePrediction *) other->data : NULL;
 }
 
 static gboolean

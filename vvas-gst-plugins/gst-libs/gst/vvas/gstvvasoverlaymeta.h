@@ -20,20 +20,21 @@
 
 #include <gst/gst.h>
 #include <gst/video/video.h>
-#include <string.h>
 #include <gst/vvas/gstinferenceprediction.h>
+#include <string.h>
 #include <vvas_core/vvas_overlay_shape_info.h>
 
 G_BEGIN_DECLS
 
-#define GST_VVAS_OVERLAY_META_API_TYPE  (gst_vvas_overlay_meta_api_get_type())
-#define GST_VVAS_OVERLAY_META_INFO  (gst_vvas_overlay_meta_get_info())
+#define GST_VVAS_OVERLAY_META_API_TYPE (gst_vvas_overlay_meta_api_get_type ())
+#define GST_VVAS_OVERLAY_META_INFO (gst_vvas_overlay_meta_get_info ())
 
 typedef struct _GstVvasOverlayMeta GstVvasOverlayMeta;
 
-struct _GstVvasOverlayMeta {
+struct _GstVvasOverlayMeta
+{
   GstMeta meta;
- 
+
   /** Overlay information */
   VvasOverlayShapeInfo shape_info;
 };
@@ -42,10 +43,24 @@ GST_EXPORT
 GType gst_vvas_overlay_meta_api_get_type (void);
 
 GST_EXPORT
-const GstMetaInfo * gst_vvas_overlay_meta_get_info (void);
+const GstMetaInfo *gst_vvas_overlay_meta_get_info (void);
 
-#define gst_buffer_get_vvas_overlay_meta(b) ((GstVvasOverlayMeta*)gst_buffer_get_meta((b), GST_VVAS_OVERLAY_META_API_TYPE))
-#define gst_buffer_add_vvas_overlay_meta(b) ((GstVvasOverlayMeta*)gst_buffer_add_meta((b), GST_VVAS_OVERLAY_META_INFO, NULL))
+GST_EXPORT
+gboolean gst_vvas_overlay_meta_append_translated (GstVvasOverlayMeta *dest,
+    const GstVvasOverlayMeta *src,
+    guint origin_x,
+    guint origin_y,
+    guint tile_width,
+    guint tile_height,
+    guint master_width,
+    guint master_height);
+
+#define gst_buffer_get_vvas_overlay_meta(b)                                    \
+  ((GstVvasOverlayMeta *)gst_buffer_get_meta (                                 \
+      (b), GST_VVAS_OVERLAY_META_API_TYPE))
+#define gst_buffer_add_vvas_overlay_meta(b)                                    \
+  ((GstVvasOverlayMeta *)gst_buffer_add_meta (                                 \
+      (b), GST_VVAS_OVERLAY_META_INFO, NULL))
 
 G_END_DECLS
 

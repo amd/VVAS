@@ -33,6 +33,7 @@
 #include <gst/vvas/gstinferencemeta.h>
 #include <gst/vvas/gstvvasoverlaymeta.h>
 #include <gst/vvas/gstvvascoreutils.h>
+#include <gst/vvas/gstvvaslogbridge.h>
 #include <vvas_core/vvas_common.h>
 #include <vvas_core/vvas_metaconvert.h>
 #include "gstvvas_xmetaconvert.h"
@@ -47,6 +48,7 @@
 #define DEFAULT_THICKNESS 1
 #define DEFAULT_RADIUS 3
 #define DEFAULT_MASK_LEVEL 0
+#define DEFAULT_MASK_ALPHA 0.5
 
 GST_DEBUG_CATEGORY_STATIC (gst_vvas_xmetaconvert_debug_category);
 #define GST_CAT_DEFAULT gst_vvas_xmetaconvert_debug_category
@@ -137,7 +139,7 @@ G_DEFINE_TYPE_WITH_PRIVATE (GstVvas_Xmetaconvert, gst_vvas_xmetaconvert,
 
 /* GObject vmethod implementations */
 static gboolean
-gst_vvas_xmetaconvert_parse_config (GstVvas_Xmetaconvert *filter)
+gst_vvas_xmetaconvert_parse_config (GstVvas_Xmetaconvert * filter)
 {
   GstVvas_XmetaconvertPrivate *priv = filter->priv;
   json_t *root = NULL, *config = NULL, *val = NULL, *karray = NULL;
@@ -218,6 +220,13 @@ gst_vvas_xmetaconvert_parse_config (GstVvas_Xmetaconvert *filter)
     priv->cfg.mask_level = DEFAULT_MASK_LEVEL;
   else
     priv->cfg.mask_level = json_integer_value (val);
+
+  val = json_object_get (config, "mask-alpha");
+  if (!val || !json_is_number (val)) {
+    priv->cfg.mask_alpha = DEFAULT_MASK_ALPHA;
+  } else {
+    priv->cfg.mask_alpha = json_number_value (val);
+  }
 
   val = json_object_get (config, "y-offset");
   if (!val || !json_is_integer (val))
@@ -430,7 +439,7 @@ error:
 }
 
 static void
-gst_vvas_xmetaconvert_class_init (GstVvas_XmetaconvertClass *klass)
+gst_vvas_xmetaconvert_class_init (GstVvas_XmetaconvertClass * klass)
 {
   GObjectClass *gobject_class = G_OBJECT_CLASS (klass);
   GstBaseTransformClass *base_transform_class =
@@ -473,7 +482,7 @@ gst_vvas_xmetaconvert_class_init (GstVvas_XmetaconvertClass *klass)
 }
 
 static void
-gst_vvas_xmetaconvert_init (GstVvas_Xmetaconvert *vvasxmetaconvert)
+gst_vvas_xmetaconvert_init (GstVvas_Xmetaconvert * vvasxmetaconvert)
 {
   vvasxmetaconvert->priv = GST_VVAS_XMETACONVERT_PRIVATE (vvasxmetaconvert);
 
@@ -484,8 +493,8 @@ gst_vvas_xmetaconvert_init (GstVvas_Xmetaconvert *vvasxmetaconvert)
 }
 
 void
-gst_vvas_xmetaconvert_set_property (GObject *object, guint property_id,
-    const GValue *value, GParamSpec *pspec)
+gst_vvas_xmetaconvert_set_property (GObject * object, guint property_id,
+    const GValue * value, GParamSpec * pspec)
 {
   GstVvas_Xmetaconvert *vvasxmetaconvert = GST_VVAS_XMETACONVERT (object);
 
@@ -505,8 +514,8 @@ gst_vvas_xmetaconvert_set_property (GObject *object, guint property_id,
 }
 
 void
-gst_vvas_xmetaconvert_get_property (GObject *object, guint property_id,
-    GValue *value, GParamSpec *pspec)
+gst_vvas_xmetaconvert_get_property (GObject * object, guint property_id,
+    GValue * value, GParamSpec * pspec)
 {
   GstVvas_Xmetaconvert *vvasxmetaconvert = GST_VVAS_XMETACONVERT (object);
 
@@ -523,7 +532,7 @@ gst_vvas_xmetaconvert_get_property (GObject *object, guint property_id,
 }
 
 void
-gst_vvas_xmetaconvert_finalize (GObject *object)
+gst_vvas_xmetaconvert_finalize (GObject * object)
 {
   GstVvas_Xmetaconvert *vvasxmetaconvert = GST_VVAS_XMETACONVERT (object);
 
@@ -543,7 +552,7 @@ gst_vvas_xmetaconvert_finalize (GObject *object)
 }
 
 static gboolean
-gst_vvas_xmetaconvert_start (GstBaseTransform *trans)
+gst_vvas_xmetaconvert_start (GstBaseTransform * trans)
 {
   GstVvas_Xmetaconvert *vvasxmetaconvert = GST_VVAS_XMETACONVERT (trans);
   GstVvas_XmetaconvertPrivate *priv = vvasxmetaconvert->priv;
@@ -573,7 +582,7 @@ gst_vvas_xmetaconvert_start (GstBaseTransform *trans)
 }
 
 static gboolean
-gst_vvas_xmetaconvert_stop (GstBaseTransform *trans)
+gst_vvas_xmetaconvert_stop (GstBaseTransform * trans)
 {
   GstVvas_Xmetaconvert *vvasxmetaconvert = GST_VVAS_XMETACONVERT (trans);
   GstVvas_XmetaconvertPrivate *priv = vvasxmetaconvert->priv;
@@ -606,8 +615,8 @@ gst_vvas_xmetaconvert_stop (GstBaseTransform *trans)
 }
 
 static gboolean
-gst_vvas_xmetaconvert_set_caps (GstBaseTransform *trans, GstCaps *incaps,
-    GstCaps *outcaps)
+gst_vvas_xmetaconvert_set_caps (GstBaseTransform * trans, GstCaps * incaps,
+    GstCaps * outcaps)
 {
   GstVvas_Xmetaconvert *vvasxmetaconvert = GST_VVAS_XMETACONVERT (trans);
   GstVvas_XmetaconvertPrivate *priv = vvasxmetaconvert->priv;
@@ -623,9 +632,10 @@ gst_vvas_xmetaconvert_set_caps (GstBaseTransform *trans, GstCaps *incaps,
 }
 
 static GstFlowReturn
-gst_vvas_xmetaconvert_transform_ip (GstBaseTransform *trans, GstBuffer *buf)
+gst_vvas_xmetaconvert_transform_ip (GstBaseTransform * trans, GstBuffer * buf)
 {
   GstVvas_Xmetaconvert *vvasxmetaconvert = GST_VVAS_XMETACONVERT (trans);
+  GST_VVAS_LOG_SCOPE (vvasxmetaconvert);
   GstVvas_XmetaconvertPrivate *priv = vvasxmetaconvert->priv;
   GstVvasOverlayMeta *out_meta;
   struct overlayframe_info *frameinfo = &(priv->frameinfo);
@@ -673,8 +683,9 @@ gst_vvas_xmetaconvert_transform_ip (GstBaseTransform *trans, GstBuffer *buf)
 }
 
 static gboolean
-plugin_init (GstPlugin *vvas_xmetaconvert)
+plugin_init (GstPlugin * vvas_xmetaconvert)
 {
+  gst_vvas_log_bridge_install ();
   return gst_element_register (vvas_xmetaconvert, "vvas_xmetaconvert",
       GST_RANK_PRIMARY, GST_TYPE_VVAS_XMETACONVERT);
 }

@@ -50,6 +50,10 @@ source <sdk-path>/environment-setup-cortexa72-cortexa53-amd-linux
 ./build_install_vvas.sh
 ```
 
+The local embedded build always includes the VEK385 four-camera scripts and
+inference configurations in `install/vvas_installer.tar.gz`. Yocto recipes
+can select the `mipi-camera` Meson option independently.
+
 **Step 3:** Deploy to board:
 ```bash
 scp install/vvas_installer.tar.gz <board-ip>:/
@@ -81,6 +85,7 @@ and configuration details.
 | `vvas_xmulticrop` | Crop multiple regions of interest |
 | `vvas_xfunnel` | Round-robin stream multiplexer |
 | `vvas_xdefunnel` | Stream demultiplexer |
+| `vvas_xtilecompositor` | Compose four DMA-BUF tiles using slot and epoch coordination |
 
 ## Supported Inference Backends
 
@@ -104,4 +109,4 @@ options, and advanced pipeline patterns.
 
 This project is licensed under the Apache License 2.0 — see [LICENSE](LICENSE)
 for details. Some files derived from third-party projects may carry different
-licenses — see [NOTICE](NOTICE) for attribution.
+licenses — see [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt) for attribution.

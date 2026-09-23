@@ -118,6 +118,119 @@ parse_float_or_float_list(void* element,
   return out;
 }
 
+typedef enum
+{
+  PARSE_BOOL_ABSENT,
+  PARSE_BOOL_OK,
+  PARSE_BOOL_FALLBACK,
+  PARSE_BOOL_ERROR
+} ParseBoolResult;
+
+static const char *
+json_type_to_string (json_type type)
+{
+  switch (type) {
+  case JSON_OBJECT:
+    return "object";
+  case JSON_ARRAY:
+    return "array";
+  case JSON_STRING:
+    return "string";
+  case JSON_INTEGER:
+    return "integer";
+  case JSON_REAL:
+    return "real";
+  case JSON_TRUE:
+    return "true";
+  case JSON_FALSE:
+    return "false";
+  case JSON_NULL:
+    return "null";
+  default:
+    return "unknown";
+  }
+}
+
+/**
+ * @brief Parse a JSON boolean config value accepting true/false or 0/1 integer.
+ * @param element Gst element used for logging
+ * @param value JSON value (NULL if key absent)
+ * @param key Config key name for warning messages
+ * @param default_val Value used when key is absent or type is invalid
+ * @param out Parsed boolean result
+ * @return PARSE_BOOL_ABSENT, PARSE_BOOL_OK, or PARSE_BOOL_FALLBACK
+ */
+static ParseBoolResult
+parse_bool_with_fallback (void *element, json_t *value, const char *key,
+    gboolean default_val, gboolean *out)
+{
+  if (!out)
+    return PARSE_BOOL_FALLBACK;
+
+  if (!value) {
+    *out = default_val;
+    return PARSE_BOOL_ABSENT;
+  }
+
+  if (json_is_boolean (value)) {
+    *out = json_boolean_value (value);
+    return PARSE_BOOL_OK;
+  }
+
+  if (json_is_integer (value)) {
+    json_int_t iv = json_integer_value (value);
+    if (iv == 0 || iv == 1) {
+      *out = (iv != 0);
+      return PARSE_BOOL_OK;
+    }
+    GST_WARNING_OBJECT (element,
+        "config key '%s': expected boolean or 0/1 integer, got integer %lld; using default %s",
+        key, (long long) iv, default_val ? "true" : "false");
+    *out = default_val;
+    return PARSE_BOOL_FALLBACK;
+  }
+
+  GST_WARNING_OBJECT (element,
+      "config key '%s': expected boolean or 0/1 integer, got %s; using default %s",
+      key, json_type_to_string (json_typeof (value)), default_val ? "true" : "false");
+  *out = default_val;
+  return PARSE_BOOL_FALLBACK;
+}
+
+/**
+ * @brief Parse a present JSON boolean config value; bool and 0/1 integer only.
+ * @param element Gst element used for logging
+ * @param value JSON value (must be non-NULL)
+ * @param key Config key name for error messages
+ * @param out Parsed boolean result
+ * @return PARSE_BOOL_OK or PARSE_BOOL_ERROR
+ */
+static ParseBoolResult
+parse_bool_strict (void *element, json_t *value, const char *key, gboolean *out)
+{
+  g_return_val_if_fail (out != NULL && value != NULL, PARSE_BOOL_ERROR);
+
+  if (json_is_boolean (value)) {
+    *out = json_boolean_value (value);
+    return PARSE_BOOL_OK;
+  }
+
+  if (json_is_integer (value)) {
+    json_int_t iv = json_integer_value (value);
+    if (iv == 0 || iv == 1) {
+      *out = (iv != 0);
+      return PARSE_BOOL_OK;
+    }
+    GST_ERROR_OBJECT (element,
+        "%s: expected boolean or 0/1 integer, got integer %lld",
+        key, (long long) iv);
+    return PARSE_BOOL_ERROR;
+  }
+
+  GST_ERROR_OBJECT (element, "%s is not a boolean type", key);
+  return PARSE_BOOL_ERROR;
+}
+
 void vvas_infer_profiler_init (VvasInferProfiler *p) {
   VVAS_PROFILER_STATS_INIT (&p->pre_proc);
   VVAS_PROFILER_STATS_INIT (&p->infer);
@@ -390,12 +503,9 @@ read_ppe_config (void* element, json_t * root, PreProcessInfo* pre_proc)
 
   value = json_object_get (config, "software-ppe");
   if (value) {
-    if (!json_is_boolean (value)) {
-      GST_ERROR_OBJECT (element, "software-ppe is not a boolean type");
-      goto error;
-    } else {
-      pre_proc->use_software = json_boolean_value (value);
-    }
+    gboolean use_software;
+    parse_bool_with_fallback (element, value, "software-ppe", FALSE, &use_software);
+    pre_proc->use_software = use_software;
   } else {
     /* If not mentioned, then the ppe used will be accelerated IP */
     pre_proc->use_software = FALSE;
@@ -490,27 +600,23 @@ read_ppe_config (void* element, json_t * root, PreProcessInfo* pre_proc)
   }
 
   value = json_object_get (config, "maintain-aspect-ratio");
-  if (!value || !json_is_integer (value)) {
-    pre_proc->param.maintain_aspect_ratio = DEFAULT_MAINTAIN_ASPECT_RATIO;
-    GST_DEBUG_OBJECT (element,
-        "Maintain aspect ratio is not set. Default not set.");
-  } else {
-    int flag = json_integer_value (value);
-    pre_proc->param.maintain_aspect_ratio =
-        flag ? TRUE : DEFAULT_MAINTAIN_ASPECT_RATIO;
+  {
+    gboolean maintain_aspect_ratio;
+    parse_bool_with_fallback (element, value, "maintain-aspect-ratio",
+        DEFAULT_MAINTAIN_ASPECT_RATIO, &maintain_aspect_ratio);
+    pre_proc->param.maintain_aspect_ratio = maintain_aspect_ratio;
     GST_INFO_OBJECT (element, "Maintain aspect ratio is %s",
         pre_proc->param.maintain_aspect_ratio ? "set" : "not set");
   }
 
   value = json_object_get (config, "symmetric-padding");
-  if (!value || !json_is_integer (value)) {
-    pre_proc->param.symmetric_padding = DEFAULT_SYMMETRIC_PADDING;
-    GST_DEBUG_OBJECT (element, "Symmetric Padding is not set. Default not set.");
-  } else {
-    int flag = json_integer_value (value);
-    pre_proc->param.symmetric_padding =
-        flag ? TRUE : DEFAULT_MAINTAIN_ASPECT_RATIO;
-    GST_INFO_OBJECT (element, "Symmetric Padding is %s", flag ? "set" : "not set");
+  {
+    gboolean symmetric_padding;
+    parse_bool_with_fallback (element, value, "symmetric-padding",
+        DEFAULT_SYMMETRIC_PADDING, &symmetric_padding);
+    pre_proc->param.symmetric_padding = symmetric_padding;
+    GST_INFO_OBJECT (element, "Symmetric Padding is %s",
+        pre_proc->param.symmetric_padding ? "set" : "not set");
   }
 
   value = json_object_get (config, "image-pad-value");
@@ -673,12 +779,20 @@ static gboolean read_onnxrt_config(void* element, json_t* config, InferInfo* inf
       infer->ort_info.input_tensor_layout.c_str());
   }
 
+  infer->ort_info.output_tensor_layout.clear();
+  value = json_object_get (onnx_config, "output-tensor-layout");
+  if (value && json_is_string (value)) {
+    infer->ort_info.output_tensor_layout = json_string_value (value);
+    GST_DEBUG_OBJECT (element, "output-tensor-layout: %s",
+        infer->ort_info.output_tensor_layout.c_str ());
+  }
+
   value = json_object_get (onnx_config, "enable-profiling");
-  if (!value || !json_is_boolean (value)) {
-    GST_DEBUG_OBJECT (element, "enable-profiling is not set");
-    infer->ort_info.enable_profiling = false;
-  } else {
-    infer->ort_info.enable_profiling = json_boolean_value (value);
+  {
+    gboolean enable_profiling;
+    parse_bool_with_fallback (element, value, "enable-profiling", FALSE,
+        &enable_profiling);
+    infer->ort_info.enable_profiling = enable_profiling;
     GST_DEBUG_OBJECT (element, "enable-profiling is %s",
         infer->ort_info.enable_profiling ? "set" : "not set");
   }
@@ -725,25 +839,24 @@ static gboolean read_onnxrt_config(void* element, json_t* config, InferInfo* inf
 
   if (vitisai_config) {
     value = json_object_get (vitisai_config, "ai-analyzer-profiling");
-    if (!value || !json_is_boolean (value)) {
-      GST_DEBUG_OBJECT (element, "ai-analyzer-profiling is not set");
-      GST_DEBUG_OBJECT (element, "setting ai-analyzer-profiling to false as default");
-      infer->ort_info.vai_conf.ai_analyzer_profiling = false;
-    } else {
-      infer->ort_info.vai_conf.ai_analyzer_profiling = json_boolean_value (value);
+    {
+      gboolean ai_analyzer_profiling;
+      parse_bool_with_fallback (element, value, "ai-analyzer-profiling", FALSE,
+          &ai_analyzer_profiling);
+      infer->ort_info.vai_conf.ai_analyzer_profiling = ai_analyzer_profiling;
       GST_DEBUG_OBJECT (element, "ai-analyzer-profiling is %s",
           infer->ort_info.vai_conf.ai_analyzer_profiling ? "true" : "false");
     }
 
     value = json_object_get (vitisai_config, "ai-analyzer-visualization");
-    if (!value || !json_is_boolean (value)) {
-      GST_DEBUG_OBJECT (element, "ai-analyzer-visualization is not set");
-      GST_DEBUG_OBJECT (element, "setting ai-analyzer-visualization to false as default");
-      infer->ort_info.vai_conf.ai_analyzer_visualization = false;
-    } else {
-      infer->ort_info.vai_conf.ai_analyzer_visualization = json_boolean_value (value);
+    {
+      gboolean ai_analyzer_visualization;
+      parse_bool_with_fallback (element, value, "ai-analyzer-visualization",
+          FALSE, &ai_analyzer_visualization);
+      infer->ort_info.vai_conf.ai_analyzer_visualization =
+          ai_analyzer_visualization;
       GST_DEBUG_OBJECT (element, "ai-analyzer-visualization is %s",
-        infer->ort_info.vai_conf.ai_analyzer_visualization ? "true" : "false");
+          infer->ort_info.vai_conf.ai_analyzer_visualization ? "true" : "false");
     }
 
     value = json_object_get (vitisai_config, "config-file-path");
@@ -818,14 +931,13 @@ read_vart_config (void* element, json_t* config, InferInfo* infer)
   }
 
   value = json_object_get (vart_config, "ai-analyzer-profiling");
-  if (!value || !json_is_boolean (value)) {
-    GST_DEBUG_OBJECT (element, "ai-analyzer-profiling is not set");
-    GST_DEBUG_OBJECT (element, "setting ai-analyzer-profiling to false as default");
-    infer->vart_info.ai_analyzer_profiling = false;
-  } else {
-    infer->vart_info.ai_analyzer_profiling = json_boolean_value (value);
+  {
+    gboolean ai_analyzer_profiling;
+    parse_bool_with_fallback (element, value, "ai-analyzer-profiling", FALSE,
+        &ai_analyzer_profiling);
+    infer->vart_info.ai_analyzer_profiling = ai_analyzer_profiling;
     GST_DEBUG_OBJECT (element, "ai-analyzer-profiling is %s",
-          infer->vart_info.ai_analyzer_profiling ? "true" : "false");
+        infer->vart_info.ai_analyzer_profiling ? "true" : "false");
   }
 
   infer->vart_info.inp_tensor_type = vart::TensorType::HW;
@@ -865,13 +977,6 @@ read_vart_config (void* element, json_t* config, InferInfo* infer)
     GST_DEBUG_OBJECT (element, "output-tensor-type config is set to %s", tmp.c_str());
   }
 
-  if(infer->vart_info.inp_tensor_type != infer->vart_info.out_tensor_type) {
-    GST_ERROR_OBJECT (element, "input-tensor-type and output-tensor-type must be the same provided [%s, %s]", 
-        infer->vart_info.inp_tensor_type == vart::TensorType::CPU ? "cpu" : "hw", 
-        infer->vart_info.out_tensor_type == vart::TensorType::CPU ? "cpu" : "hw");
-    return FALSE;
-  }
-
   value = json_object_get (vart_config, "out-mem-bank");
   if (!value || !json_is_integer (value)) {
     int32_t idx = DEFAULT_MEM_BANK;
@@ -887,13 +992,22 @@ read_vart_config (void* element, json_t* config, InferInfo* infer)
   }
 
   value = json_object_get (vart_config, "aie-columns-sharing");
-  if (!value || !json_is_boolean (value)) {
-    GST_DEBUG_OBJECT (element, "aie-columns-sharing is not set");
-    infer->vart_info.is_columns_sharing_option_provided = false;
-  } else {
-    infer->vart_info.aie_columns_sharing = json_boolean_value (value);
-    infer->vart_info.is_columns_sharing_option_provided = true;
-    GST_DEBUG_OBJECT (element, "aie-columns-sharing: %s", infer->vart_info.aie_columns_sharing ? "true" : "false");
+  {
+    gboolean aie_columns_sharing;
+    ParseBoolResult result = parse_bool_with_fallback (element, value,
+        "aie-columns-sharing", infer->vart_info.aie_columns_sharing,
+        &aie_columns_sharing);
+    if (result == PARSE_BOOL_OK) {
+      infer->vart_info.aie_columns_sharing = aie_columns_sharing;
+      infer->vart_info.is_columns_sharing_option_provided = true;
+      GST_DEBUG_OBJECT (element, "aie-columns-sharing: %s",
+          infer->vart_info.aie_columns_sharing ? "true" : "false");
+    } else {
+      infer->vart_info.is_columns_sharing_option_provided = false;
+      if (result == PARSE_BOOL_ABSENT) {
+        GST_DEBUG_OBJECT (element, "aie-columns-sharing is not set");
+      }
+    }
   }
 
   value = json_object_get (vart_config, "start-column");
@@ -917,6 +1031,15 @@ read_vart_config (void* element, json_t* config, InferInfo* infer)
   } else {
     infer->vart_info.config_file_path = (json_string_value (value));
     GST_DEBUG_OBJECT (element, "config-json-path: %s", infer->vart_info.config_file_path.c_str());
+  }
+
+  value = json_object_get (vart_config, "use-async");
+  {
+    gboolean use_async;
+    parse_bool_with_fallback (element, value, "use-async", TRUE, &use_async);
+    infer->vart_info.use_async = use_async;
+    GST_DEBUG_OBJECT (element, "use-async: %s",
+        infer->vart_info.use_async ? "true" : "false");
   }
 
   return TRUE;
@@ -1041,12 +1164,11 @@ read_infer_config (void* element, json_t * root, InferInfo* infer)
 
   value = json_object_get (config, "low-latency");
   if (value) {
-    if (!json_is_boolean (value)) {
-      GST_ERROR_OBJECT (element, "low-latency is not a boolean type");
+    gboolean low_latency;
+    if (parse_bool_strict (element, value, "low-latency", &low_latency) !=
+        PARSE_BOOL_OK)
       goto error;
-    }
-
-    infer->low_latency = json_boolean_value (value);
+    infer->low_latency = low_latency;
     GST_INFO_OBJECT (element, "setting low-latency to %d",
         infer->low_latency);
   }
@@ -1070,12 +1192,11 @@ read_infer_config (void* element, json_t * root, InferInfo* infer)
 
   value = json_object_get (config, "attach-ppe-outbuf");
   if (value) {
-    if (!json_is_boolean (value)) {
-      GST_ERROR_OBJECT (element, "attach-ppe-outbuf is not a boolean type");
+    gboolean attach_ppebuf;
+    if (parse_bool_strict (element, value, "attach-ppe-outbuf",
+            &attach_ppebuf) != PARSE_BOOL_OK)
       goto error;
-    }
-
-    infer->attach_ppebuf = json_boolean_value (value);
+    infer->attach_ppebuf = attach_ppebuf;
     GST_INFO_OBJECT (element, "setting attach-ppe-outbuf to %d",
         infer->attach_ppebuf);
   }
@@ -1207,12 +1328,11 @@ read_infer_config (void* element, json_t * root, InferInfo* infer)
 
   value = json_object_get (config, "attach-empty-metadata");
   if (value) {
-    if (!json_is_boolean (value)) {
-      GST_ERROR_OBJECT (element, "attach-empty-metadata is not a boolean type");
+    gboolean attach_empty_meta;
+    if (parse_bool_strict (element, value, "attach-empty-metadata",
+            &attach_empty_meta) != PARSE_BOOL_OK)
       goto error;
-    }
-
-    infer->attach_empty_meta = json_boolean_value (value);
+    infer->attach_empty_meta = attach_empty_meta;
     GST_INFO_OBJECT (element, "setting attach-empty-metadata to %d",
         infer->attach_empty_meta);
   }
@@ -1325,6 +1445,59 @@ read_postprocess_config (void* element, json_t * root, PostProcessInfo* post_pro
   return TRUE;
 }
 
+gboolean
+infer_generic_preprocess_layout (const vart::NpuTensorInfo& tensor,
+    vart::MemoryLayout& inferred_layout,
+    uint32_t& inferred_width,
+    uint32_t& inferred_height,
+    std::string& error_reason)
+{
+  const auto& shape = tensor.shape;
+
+  inferred_layout = vart::MemoryLayout::GENERIC;
+  inferred_width = 0;
+  inferred_height = 0;
+  error_reason.clear ();
+
+  if (shape.size () == 4) {
+    const bool nchw_candidate = (shape[1] == 3 || shape[1] == 4);
+    const bool nhwc_candidate = (shape[3] == 3 || shape[3] == 4);
+
+    if (nchw_candidate && nhwc_candidate) {
+      error_reason = "ambiguous 4D tensor: cannot be inferred as NCHW or NHWC";
+      return FALSE;
+    }
+
+    if (nchw_candidate) {
+      inferred_layout = vart::MemoryLayout::NCHW;
+      inferred_height = static_cast<uint32_t> (shape[2]);
+      inferred_width = static_cast<uint32_t> (shape[3]);
+    } else if (nhwc_candidate) {
+      inferred_layout = vart::MemoryLayout::NHWC;
+      inferred_height = static_cast<uint32_t> (shape[1]);
+      inferred_width = static_cast<uint32_t> (shape[2]);
+    } else {
+      error_reason =
+          "4D GENERIC preprocessing expects channels to be 3 or 4 in either "
+          "channel-first (N,C,H,W) or channel-last (N,H,W,C) order";
+      return FALSE;
+    }
+  } else {
+    error_reason = "GENERIC preprocessing supports only 4D tensors";
+    return FALSE;
+  }
+
+  if (inferred_width == 0 || inferred_height == 0) {
+    error_reason = "resolved GENERIC tensor width/height is zero";
+    inferred_layout = vart::MemoryLayout::GENERIC;
+    inferred_width = 0;
+    inferred_height = 0;
+    return FALSE;
+  }
+
+  return TRUE;
+}
+
 VvasVideoFormat
 get_tensor_format (VvasVideoFormat model_format, std::string& layout, VvasTensorDataType data_type)
 {
@@ -1333,7 +1506,8 @@ get_tensor_format (VvasVideoFormat model_format, std::string& layout, VvasTensor
     return VVAS_VIDEO_FORMAT_UNKNOWN;
   }
 
-  if (layout != "NCHW" && layout != "NHWC" && layout != "HCWNC4" ) {
+  if (layout != "NCHW" && layout != "NHWC" && layout != "HCWNC4" &&
+      layout != "HCWNC8") {
     GST_ERROR ("Unknown layout: %s", layout.c_str());
     return VVAS_VIDEO_FORMAT_UNKNOWN;
   }
@@ -1355,14 +1529,18 @@ get_tensor_format (VvasVideoFormat model_format, std::string& layout, VvasTensor
         case VVAS_TENSOR_DATA_TYPE_INT8:
           if (layout == "HCWNC4") {
             return VVAS_VIDEO_FORMAT_RGBx;
+          } else if (layout == "HCWNC8") {
+            return VVAS_VIDEO_FORMAT_RGBx_C8;
           } else {
             return layout == "NCHW" ? VVAS_VIDEO_FORMAT_RGBP : VVAS_VIDEO_FORMAT_RGB;
           }
         case VVAS_TENSOR_DATA_TYPE_BF16:
           if (layout == "HCWNC4") return VVAS_VIDEO_FORMAT_RGBx_BF16;
+          if (layout == "HCWNC8") return VVAS_VIDEO_FORMAT_RGBx_BF16_C8;
           return layout == "NCHW" ? VVAS_VIDEO_FORMAT_RGBP_BF16 : VVAS_VIDEO_FORMAT_RGB_BF16;
         case VVAS_TENSOR_DATA_TYPE_FP16:
           if (layout == "HCWNC4") return VVAS_VIDEO_FORMAT_RGBx_FP16;
+          if (layout == "HCWNC8") return VVAS_VIDEO_FORMAT_RGBx_FP16_C8;
           return layout == "NCHW" ? VVAS_VIDEO_FORMAT_RGBP_FP16 : VVAS_VIDEO_FORMAT_RGB_FP16;
         default:
           return VVAS_VIDEO_FORMAT_UNKNOWN;
@@ -1401,6 +1579,8 @@ get_tensor_format (VvasVideoFormat model_format, vart::MemoryLayout layout, Vvas
     layout_str = "NHWC";
   } else if (layout == vart::MemoryLayout::HCWNC4) {
     layout_str = "HCWNC4";
+  } else if (layout == vart::MemoryLayout::HCWNC8) {
+    layout_str = "HCWNC8";
   } else {
     GST_ERROR ("Unknown layout");
     return VVAS_VIDEO_FORMAT_UNKNOWN;

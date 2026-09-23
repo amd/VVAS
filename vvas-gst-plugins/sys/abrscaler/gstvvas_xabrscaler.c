@@ -57,6 +57,7 @@
 #include <gst/vvas/gstvvasallocator.h>
 #include <gst/vvas/gstvvasbufferpool.h>
 #include <gst/vvas/gstinferencemeta.h>
+#include <gst/vvas/gstvvaspreprocessmeta.h>
 #include <gst/vvas/gstvvashdrmeta.h>
 #include <gst/vvas/gstvvasoverlaymeta.h>
 #ifdef XLNX_PCIe_PLATFORM
@@ -67,6 +68,7 @@
 #include "gstvvas_xabrscaler.h"
 
 #include <gst/vvas/gstvvascoreutils.h>
+#include <gst/vvas/gstvvaslogbridge.h>
 #include <vvas_core/vvas_context.h>
 #include <vvas_core/vvas_common.h>
 #include <vvas_core/vvas_image_process.h>
@@ -390,7 +392,7 @@ G_DEFINE_TYPE (GstVvasXAbrScalerPad, gst_vvas_xabrscaler_pad, GST_TYPE_PAD);
  *  @brief  Dispose handler for GstVvasXAbrScalerPad; releases held GstObject references.
  */
 static void
-gst_vvas_xabrscaler_pad_dispose (GObject * object)
+gst_vvas_xabrscaler_pad_dispose (GObject *object)
 {
   GstVvasXAbrScalerPad *srcpad = GST_VVAS_XABRSCALER_PAD (object);
 
@@ -409,7 +411,7 @@ gst_vvas_xabrscaler_pad_dispose (GObject * object)
  *  @brief  Finalize handler for GstVvasXAbrScalerPad; frees GstVideoInfo members.
  */
 static void
-gst_vvas_xabrscaler_pad_finalize (GObject * object)
+gst_vvas_xabrscaler_pad_finalize (GObject *object)
 {
   GstVvasXAbrScalerPad *srcpad = GST_VVAS_XABRSCALER_PAD (object);
 
@@ -428,7 +430,7 @@ gst_vvas_xabrscaler_pad_finalize (GObject * object)
  *  @brief  One of the constructor functions called for GstVvasXAbrScalerPad
  */
 static void
-gst_vvas_xabrscaler_pad_class_init (GstVvasXAbrScalerPadClass * klass)
+gst_vvas_xabrscaler_pad_class_init (GstVvasXAbrScalerPadClass *klass)
 {
   GObjectClass *gobject_class = G_OBJECT_CLASS (klass);
   gobject_class->dispose = gst_vvas_xabrscaler_pad_dispose;
@@ -442,7 +444,7 @@ gst_vvas_xabrscaler_pad_class_init (GstVvasXAbrScalerPadClass * klass)
  *  @brief  One of the constructor functions called for GstVvasXAbrScalerPad
  */
 static void
-gst_vvas_xabrscaler_pad_init (GstVvasXAbrScalerPad * pad)
+gst_vvas_xabrscaler_pad_init (GstVvasXAbrScalerPad *pad)
 {
   /* nothing */
 }
@@ -469,6 +471,8 @@ static void gst_vvas_xabrscaler_release_pad (GstElement * element,
 
 static gboolean remove_infer_meta (GstBuffer * buffer, GstMeta ** meta,
     gpointer user_data);
+static gboolean remove_preprocess_meta (GstBuffer * buffer, GstMeta ** meta,
+    gpointer user_data);
 
 /** @struct _GstVvasXAbrScalerPrivate
  *  @brief  Structure with internal private data members for abrscaler plugin.
@@ -481,6 +485,8 @@ struct _GstVvasXAbrScalerPrivate
   vvasDeviceHandle dev_handle;
   /** Array of output buffers to be pushed out for each input */
   GstBuffer *outbufs[MAX_CHANNELS];
+  /** Effective preprocessing geometry for each output buffer */
+  GstVvasPreprocessGeometry preprocess_geometry[MAX_CHANNELS];
   /** Input buffer pool */
   GstBufferPool *input_pool;
   /** Flag to check if the internal buffer pool is set to active */
@@ -569,7 +575,7 @@ G_DEFINE_TYPE_WITH_PRIVATE (GstVvasXAbrScaler, gst_vvas_xabrscaler,
  */
 static inline void
 vvas_xabrscaler_free_scaler_capabilities (VvasImageProcessLibraryCapabilities
-    * libs_caps)
+    *libs_caps)
 {
   if (libs_caps) {
     for (uint8_t i = 0; i < libs_caps->num_libs; i++) {
@@ -591,9 +597,9 @@ vvas_xabrscaler_free_scaler_capabilities (VvasImageProcessLibraryCapabilities
  *  @brief This function generates GstCaps based on scaler capabilities
  */
 static GstCaps *
-vvas_xabrscaler_generate_caps (VvasImageProcessCapabilities * superset_caps,
-    VvasImageProcessCapabilities * default_caps,
-    VvasImageProcessLibraryCapabilities ** plibs_caps)
+vvas_xabrscaler_generate_caps (VvasImageProcessCapabilities *superset_caps,
+    VvasImageProcessCapabilities *default_caps,
+    VvasImageProcessLibraryCapabilities **plibs_caps)
 {
   VvasImageProcessLibraryCapabilities *libs_caps = NULL;
   GstCaps *caps = NULL;
@@ -652,7 +658,7 @@ error:
  *  @brief This function returns GstCaps for the given kernel name from VvasCoreScaler
  */
 static GstCaps *
-vvas_xabrscaler_get_pad_template_caps (GstVvasXAbrScaler * self, GstPad * pad)
+vvas_xabrscaler_get_pad_template_caps (GstVvasXAbrScaler *self, GstPad *pad)
 {
   GstCaps *pad_template_caps = NULL;
   VvasImageProcessCapabilities *lib_caps = NULL;
@@ -692,7 +698,7 @@ error:
  *          buffer.
  */
 static guint
-vvas_xabrscaler_get_stride (GstVideoInfo * info, guint width)
+vvas_xabrscaler_get_stride (GstVideoInfo *info, guint width)
 {
   guint stride = 0;
 
@@ -748,7 +754,7 @@ vvas_xabrscaler_get_stride (GstVideoInfo * info, guint width)
  *
  */
 static ColorDomain
-vvas_xabrscaler_get_color_domain (const gchar * color_format)
+vvas_xabrscaler_get_color_domain (const gchar *color_format)
 {
   GstVideoFormat format;
   const GstVideoFormatInfo *format_info;
@@ -780,8 +786,8 @@ vvas_xabrscaler_get_color_domain (const gchar * color_format)
  *
  */
 static gboolean
-vvas_xabrscaler_register_prep_write_with_caps (GstVvasXAbrScaler * self,
-    guint chan_id, GstCaps * in_caps, GstCaps * out_caps)
+vvas_xabrscaler_register_prep_write_with_caps (GstVvasXAbrScaler *self,
+    guint chan_id, GstCaps *in_caps, GstCaps *out_caps)
 {
   GstVvasXAbrScalerPad *srcpad = NULL;
   guint width = 0;
@@ -820,7 +826,7 @@ vvas_xabrscaler_register_prep_write_with_caps (GstVvasXAbrScaler * self,
  *          for getting required load based on input and output caps.
  */
 static gchar *
-vvas_xabrscaler_prepare_request_json_string (GstVvasXAbrScaler * scaler)
+vvas_xabrscaler_prepare_request_json_string (GstVvasXAbrScaler *scaler)
 {
   json_t *in_jobj, *jarray, *fps_jobj = NULL, *tmp_jobj, *tmp2_jobj, *res_jobj;
   guint in_width, in_height;
@@ -993,7 +999,7 @@ error:
  *          input and output caps.
  */
 static gboolean
-vvas_xabrscaler_calculate_load (GstVvasXAbrScaler * self, gint * load)
+vvas_xabrscaler_calculate_load (GstVvasXAbrScaler *self, gint *load)
 {
   GstVvasXAbrScalerPrivate *priv = self->priv;
   int iret = -1, func_id = 0;
@@ -1058,7 +1064,7 @@ vvas_xabrscaler_calculate_load (GstVvasXAbrScaler * self, gint * load)
  *  @brief  This function will allocate the requested processing load from FPGA using XRM (Xilinx FPGA Resource Manager).
  */
 static gboolean
-vvas_xabrscaler_allocate_xrm_resource (GstVvasXAbrScaler * self,
+vvas_xabrscaler_allocate_xrm_resource (GstVvasXAbrScaler *self,
     gint scaler_load)
 {
   GstVvasXAbrScalerPrivate *priv = self->priv;
@@ -1204,7 +1210,7 @@ vvas_xabrscaler_allocate_xrm_resource (GstVvasXAbrScaler * self,
  *  @details Cleans up XRM and XRT context.
  */
 static gboolean
-vvas_xabrscaler_destroy_xrm_resource (GstVvasXAbrScaler * self)
+vvas_xabrscaler_destroy_xrm_resource (GstVvasXAbrScaler *self)
 {
   GstVvasXAbrScalerPrivate *priv = self->priv;
   gboolean has_error = FALSE;
@@ -1263,7 +1269,7 @@ vvas_xabrscaler_destroy_xrm_resource (GstVvasXAbrScaler * self)
  *           the received buffer is non VVAS buffer or non DMA buffer.
  */
 static gboolean
-vvas_xabrscaler_allocate_internal_pool (GstVvasXAbrScaler * self)
+vvas_xabrscaler_allocate_internal_pool (GstVvasXAbrScaler *self)
 {
   GstVideoInfo info;
   GstBufferPool *pool = NULL;
@@ -1362,8 +1368,8 @@ error:
  *  @brief Validates input buffer so as to decide internal pool or upstream pool.
 */
 static gboolean
-vvas_xabrscaler_validate_buffer_import (GstVvasXAbrScaler * self,
-    GstBuffer * inbuf, gboolean * use_inpool)
+vvas_xabrscaler_validate_buffer_import (GstVvasXAbrScaler *self,
+    GstBuffer *inbuf, gboolean *use_inpool)
 {
   gboolean bret = TRUE;
   GstMemory *in_mem = NULL;
@@ -1472,8 +1478,8 @@ exit:
  *           neighther of them, then it creates an internal buffer pool.
  */
 static gboolean
-vvas_xabrscaler_prepare_input_buffer (GstVvasXAbrScaler * self,
-    GstBuffer ** inbuf)
+vvas_xabrscaler_prepare_input_buffer (GstVvasXAbrScaler *self,
+    GstBuffer **inbuf)
 {
   GstVvasXAbrScalerPrivate *priv = self->priv;
   GstMemory *in_mem = NULL;
@@ -1607,7 +1613,7 @@ error:
  *           based on whether it's a VVAS allocator memory or DMA memory.
  */
 static gboolean
-vvas_xabrscaler_prepare_output_buffer (GstVvasXAbrScaler * self)
+vvas_xabrscaler_prepare_output_buffer (GstVvasXAbrScaler *self)
 {
   guint chan_id;
   GstMemory *mem = NULL;
@@ -1699,6 +1705,8 @@ vvas_xabrscaler_input_copy_thread (gpointer data)
   GstVvasXAbrScaler *self = GST_VVAS_XABRSCALER (data);
   GstVvasXAbrScalerPrivate *priv = self->priv;
 
+  gst_vvas_log_bridge_attach_thread (GST_OBJECT (self));
+
   while (1) {
     GstBuffer *inbuf = NULL;
     GstBuffer *own_inbuf = NULL;
@@ -1765,7 +1773,7 @@ error:
  *
  */
 static gboolean
-vvas_xabrscaler_sync_buffer (GstVvasXAbrScaler * self)
+vvas_xabrscaler_sync_buffer (GstVvasXAbrScaler *self)
 {
   GstVvasXAbrScalerPrivate *priv = self->priv;
   uint32_t chan_id = 0;
@@ -1797,7 +1805,7 @@ vvas_xabrscaler_sync_buffer (GstVvasXAbrScaler * self)
  *
  */
 static void
-gst_vvas_xabrscaler_finalize (GObject * object)
+gst_vvas_xabrscaler_finalize (GObject *object)
 {
   GstVvasXAbrScaler *self = GST_VVAS_XABRSCALER (object);
 
@@ -1825,7 +1833,7 @@ gst_vvas_xabrscaler_finalize (GObject * object)
  *                  readability/writability and in which GStreamer state a property can be changed.
  */
 static void
-gst_vvas_xabrscaler_class_init (GstVvasXAbrScalerClass * klass)
+gst_vvas_xabrscaler_class_init (GstVvasXAbrScalerClass *klass)
 {
   GObjectClass *gobject_class;
   GstElementClass *gstelement_class;
@@ -2070,7 +2078,7 @@ gst_vvas_xabrscaler_class_init (GstVvasXAbrScalerClass * klass)
  *           Ex: Chain function, Event function, Query function etc.
  */
 static void
-gst_vvas_xabrscaler_init (GstVvasXAbrScaler * self)
+gst_vvas_xabrscaler_init (GstVvasXAbrScaler *self)
 {
   gint idx;
   GstVvasXAbrScalerClass *klass;
@@ -2183,8 +2191,8 @@ gst_vvas_xabrscaler_init (GstVvasXAbrScaler * self)
  *
  */
 static GstPad *
-gst_vvas_xabrscaler_request_new_pad (GstElement * element,
-    GstPadTemplate * templ, const gchar * name_templ, const GstCaps * caps)
+gst_vvas_xabrscaler_request_new_pad (GstElement *element,
+    GstPadTemplate *templ, const gchar *name_templ, const GstCaps *caps)
 {
   GstVvasXAbrScaler *self = GST_VVAS_XABRSCALER (element);
   gchar *name = NULL;
@@ -2265,7 +2273,7 @@ gst_vvas_xabrscaler_request_new_pad (GstElement * element,
  *
  */
 static void
-gst_vvas_xabrscaler_release_pad (GstElement * element, GstPad * pad)
+gst_vvas_xabrscaler_release_pad (GstElement *element, GstPad *pad)
 {
   GstVvasXAbrScaler *self;
   GstVvasXAbrScalerPad *srcpad;
@@ -2327,8 +2335,8 @@ gst_vvas_xabrscaler_release_pad (GstElement * element, GstPad * pad)
  *           value type, corresponding g_value_get_xxx API will be called to get property value from GValue handle.
  */
 static void
-gst_vvas_xabrscaler_set_property (GObject * object, guint prop_id,
-    const GValue * value, GParamSpec * pspec)
+gst_vvas_xabrscaler_set_property (GObject *object, guint prop_id,
+    const GValue *value, GParamSpec *pspec)
 {
   GstVvasXAbrScaler *self = GST_VVAS_XABRSCALER (object);
 
@@ -2460,8 +2468,8 @@ gst_vvas_xabrscaler_set_property (GObject * object, guint prop_id,
  *           value type, corresponding g_value_get_xxx API will be called to get property value from GValue handle.
  */
 static void
-gst_vvas_xabrscaler_get_property (GObject * object, guint prop_id,
-    GValue * value, GParamSpec * pspec)
+gst_vvas_xabrscaler_get_property (GObject *object, guint prop_id,
+    GValue *value, GParamSpec *pspec)
 {
   GstVvasXAbrScaler *self = GST_VVAS_XABRSCALER (object);
 
@@ -2548,7 +2556,7 @@ gst_vvas_xabrscaler_get_property (GObject * object, guint prop_id,
 }
 
 static gboolean
-gst_vvas_xabrscaler_create_core_scaler (GstVvasXAbrScaler * self,
+gst_vvas_xabrscaler_create_core_scaler (GstVvasXAbrScaler *self,
     VvasLogLevel core_log_level)
 {
   GstVvasXAbrScalerPrivate *priv = self->priv;
@@ -2629,10 +2637,11 @@ err:
  *
  */
 static GstStateChangeReturn
-gst_vvas_xabrscaler_change_state (GstElement * element,
+gst_vvas_xabrscaler_change_state (GstElement *element,
     GstStateChange transition)
 {
   GstVvasXAbrScaler *self = GST_VVAS_XABRSCALER (element);
+  GST_VVAS_LOG_SCOPE (self);
   GstVvasXAbrScalerPrivate *priv = self->priv;
   GstStateChangeReturn ret;
   guint idx = 0;
@@ -2797,8 +2806,8 @@ gst_vvas_xabrscaler_change_state (GstElement * element,
  *
  */
 static GstCaps *
-gst_vvas_xabrscaler_fixate_caps (GstVvasXAbrScaler * self,
-    GstPadDirection direction, GstCaps * caps, GstCaps * othercaps)
+gst_vvas_xabrscaler_fixate_caps (GstVvasXAbrScaler *self,
+    GstPadDirection direction, GstCaps *caps, GstCaps *othercaps)
 {
   GstStructure *ins, *outs;
   const GValue *from_par, *to_par;
@@ -3270,9 +3279,9 @@ done:
  *
  */
 static GstCaps *
-gst_vvas_xabrscaler_transform_caps (GstVvasXAbrScaler * self,
-    GstPadDirection direction, GstCaps * caps, GstCaps * peercaps,
-    GstCaps * filter)
+gst_vvas_xabrscaler_transform_caps (GstVvasXAbrScaler *self,
+    GstPadDirection direction, GstCaps *caps, GstCaps *peercaps,
+    GstCaps *filter)
 {
   GstCaps *ret;
   GstStructure *structure, *peer_structure;
@@ -3400,8 +3409,8 @@ gst_vvas_xabrscaler_transform_caps (GstVvasXAbrScaler * self,
  *
  */
 static GstCaps *
-gst_vvas_xabrscaler_find_transform (GstVvasXAbrScaler * self, GstPad * pad,
-    GstPad * otherpad, GstCaps * caps)
+gst_vvas_xabrscaler_find_transform (GstVvasXAbrScaler *self, GstPad *pad,
+    GstPad *otherpad, GstCaps *caps)
 {
   GstPad *otherpeer;
   GstCaps *othercaps;
@@ -3589,8 +3598,8 @@ error_cleanup:
  *           discarded and new pool and allocator will be created.
  */
 static gboolean
-vvas_xabrscaler_decide_allocation (GstVvasXAbrScaler * self,
-    GstVvasXAbrScalerPad * srcpad, GstQuery * query, GstCaps * outcaps)
+vvas_xabrscaler_decide_allocation (GstVvasXAbrScaler *self,
+    GstVvasXAbrScalerPad *srcpad, GstQuery *query, GstCaps *outcaps)
 {
   GstAllocator *allocator = NULL;
   GstAllocationParams params;
@@ -3988,8 +3997,8 @@ error:
  *
  */
 static gboolean
-gst_vvas_xabrscaler_sink_setcaps (GstVvasXAbrScaler * self, GstPad * sinkpad,
-    GstCaps * in_caps)
+gst_vvas_xabrscaler_sink_setcaps (GstVvasXAbrScaler *self, GstPad *sinkpad,
+    GstCaps *in_caps)
 {
   GstVvasXAbrScalerPrivate *priv = self->priv;
   GstCaps *outcaps = NULL, *prev_incaps = NULL, *prev_outcaps = NULL;
@@ -4224,10 +4233,10 @@ failed_configure:
  *
  */
 static gboolean
-gst_vvas_xabrscaler_sink_event (GstPad * pad, GstObject * parent,
-    GstEvent * event)
+gst_vvas_xabrscaler_sink_event (GstPad *pad, GstObject *parent, GstEvent *event)
 {
   GstVvasXAbrScaler *self = GST_VVAS_XABRSCALER (parent);
+  GST_VVAS_LOG_SCOPE (self);
   gboolean ret = TRUE;
 
   GST_DEBUG_OBJECT (pad, "received event '%s' %p %" GST_PTR_FORMAT,
@@ -4282,7 +4291,7 @@ gst_vvas_xabrscaler_sink_event (GstPad * pad, GstObject * parent,
  *
  */
 static gboolean
-vvas_xabrscaler_propose_allocation (GstVvasXAbrScaler * self, GstQuery * query)
+vvas_xabrscaler_propose_allocation (GstVvasXAbrScaler *self, GstQuery *query)
 {
   GstCaps *caps;
   GstVideoInfo info;
@@ -4394,8 +4403,7 @@ config_failed:
  *
  */
 static gboolean
-gst_vvas_xabrscaler_sink_query (GstPad * pad, GstObject * parent,
-    GstQuery * query)
+gst_vvas_xabrscaler_sink_query (GstPad *pad, GstObject *parent, GstQuery *query)
 {
   GstVvasXAbrScaler *self = GST_VVAS_XABRSCALER (parent);
   gboolean ret = TRUE;
@@ -4473,7 +4481,7 @@ gst_vvas_xabrscaler_sink_query (GstPad * pad, GstObject * parent,
  *  @brief  This function will query downstream for getting quantization factor.
  */
 static gboolean
-vvas_xabrscaler_query_quantization_factor (GstVvasXAbrScaler * self)
+vvas_xabrscaler_query_quantization_factor (GstVvasXAbrScaler *self)
 {
   /* Send a custom query downstream, if there is any downstream ML plug-in,
    * it will respond with quantization factor.
@@ -4543,8 +4551,8 @@ error:
  *  @brief  This function will add the channels into the VVAS CORE Scaler library for processing.
  */
 static gboolean
-vvas_xabrscaler_add_scaler_processing_chnnels (GstVvasXAbrScaler * self,
-    GstBuffer * inbuf)
+vvas_xabrscaler_add_scaler_processing_chnnels (GstVvasXAbrScaler *self,
+    GstBuffer *inbuf)
 {
   GstVvasXAbrScalerPrivate *priv = self->priv;
   guint idx;
@@ -4577,6 +4585,7 @@ vvas_xabrscaler_add_scaler_processing_chnnels (GstVvasXAbrScaler * self,
     VvasImageProcessFrameRect dst_rect = { 0 };
     VvasVideoInfo in_info = { 0 };
     VvasReturnType vret;
+    GstVvasPreprocessGeometry *geometry;
 
     GstVvasXAbrScalerPad *srcpad =
         gst_vvas_xabrscaler_srcpad_at_index (self, idx);
@@ -4639,6 +4648,12 @@ vvas_xabrscaler_add_scaler_processing_chnnels (GstVvasXAbrScaler * self,
       return FALSE;
     }
 
+    GST_DEBUG_OBJECT (self,
+        "[%u] image-process rectangles before add_frame: "
+        "src=(%d,%d %ux%u), dst=(%d,%d %ux%u)", idx,
+        src_rect.x, src_rect.y, src_rect.width, src_rect.height,
+        dst_rect.x, dst_rect.y, dst_rect.width, dst_rect.height);
+
     /* Add processing channel into Core Scaler */
 #ifdef ENABLE_PPE_SUPPORT
     vret =
@@ -4653,6 +4668,39 @@ vvas_xabrscaler_add_scaler_processing_chnnels (GstVvasXAbrScaler * self,
       GST_ERROR_OBJECT (self, "failed to add processing channel in scaler");
       return FALSE;
     }
+
+    geometry = &priv->preprocess_geometry[idx];
+    memset (geometry, 0, sizeof (*geometry));
+    geometry->abi_version = GST_VVAS_PREPROCESS_META_ABI_VERSION;
+    geometry->source_frame_width = in_info.width;
+    geometry->source_frame_height = in_info.height;
+    geometry->destination_frame_width =
+        GST_VIDEO_INFO_WIDTH (srcpad->out_vinfo);
+    geometry->destination_frame_height =
+        GST_VIDEO_INFO_HEIGHT (srcpad->out_vinfo);
+    geometry->source_rect.x = src_rect.x;
+    geometry->source_rect.y = src_rect.y;
+    geometry->source_rect.width = src_rect.width;
+    geometry->source_rect.height = src_rect.height;
+    geometry->destination_rect.x = dst_rect.x;
+    geometry->destination_rect.y = dst_rect.y;
+    geometry->destination_rect.width = dst_rect.width;
+    geometry->destination_rect.height = dst_rect.height;
+
+    if (self->maintain_aspect_ratio)
+      geometry->operation = GST_VVAS_PREPROCESS_OPERATION_LETTERBOX;
+    else if (src_rect.x != 0 || src_rect.y != 0 ||
+        src_rect.width != in_info.width || src_rect.height != in_info.height)
+      geometry->operation = GST_VVAS_PREPROCESS_OPERATION_PANSCAN;
+    else
+      geometry->operation = GST_VVAS_PREPROCESS_OPERATION_STRETCH;
+
+    GST_DEBUG_OBJECT (self,
+        "[%u] image-process rectangles after add_frame: "
+        "src=(%d,%d %ux%u), dst=(%d,%d %ux%u), operation=%d", idx,
+        src_rect.x, src_rect.y, src_rect.width, src_rect.height,
+        dst_rect.x, dst_rect.y, dst_rect.width, dst_rect.height,
+        geometry->operation);
 
     GST_DEBUG_OBJECT (self, "Added processing channel for idx: %u", idx);
 
@@ -4670,7 +4718,7 @@ vvas_xabrscaler_add_scaler_processing_chnnels (GstVvasXAbrScaler * self,
  *  @brief  This function will free all the VvasVideoFrames.
  */
 static inline void
-gst_vvas_xabrscaler_free_vvas_video_frame (GstVvasXAbrScaler * self)
+gst_vvas_xabrscaler_free_vvas_video_frame (GstVvasXAbrScaler *self)
 {
   guint chan_id = 0;
 
@@ -4700,7 +4748,7 @@ gst_vvas_xabrscaler_free_vvas_video_frame (GstVvasXAbrScaler * self)
  *
  */
 static gboolean
-remove_infer_meta (GstBuffer * buffer, GstMeta ** meta, gpointer user_data)
+remove_infer_meta (GstBuffer *buffer, GstMeta **meta, gpointer user_data)
 {
   if (meta && *meta && (*meta)->info->api == GST_INFERENCE_META_API_TYPE) {
     *meta = NULL;
@@ -4709,9 +4757,19 @@ remove_infer_meta (GstBuffer * buffer, GstMeta ** meta, gpointer user_data)
   return TRUE;
 }
 
+static gboolean
+remove_preprocess_meta (GstBuffer *buffer, GstMeta **meta, gpointer user_data)
+{
+  if (meta && *meta && (*meta)->info->api == GST_VVAS_PREPROCESS_META_API_TYPE) {
+    *meta = NULL;
+  }
+
+  return TRUE;
+}
+
 static GstBuffer *
-gst_vvas_xabrscaler_copy_output (GstBuffer * srcbuf,
-    GstVvasXAbrScalerPad * srcpad)
+gst_vvas_xabrscaler_copy_output (GstBuffer *srcbuf,
+    GstVvasXAbrScalerPad *srcpad)
 {
   GstBuffer *dstbuf;
   GstVideoFrame dstbuf_map, srcbuf_map;
@@ -4757,9 +4815,11 @@ gst_vvas_xabrscaler_copy_output (GstBuffer * srcbuf,
  *
  */
 static GstFlowReturn
-gst_vvas_xabrscaler_chain (GstPad * pad, GstObject * parent, GstBuffer * inbuf)
+gst_vvas_xabrscaler_chain (GstPad *pad, GstObject *parent, GstBuffer *inbuf)
 {
   GstVvasXAbrScaler *self = GST_VVAS_XABRSCALER (parent);
+  GstVvasXAbrScalerPrivate *priv = self->priv;
+  GST_VVAS_LOG_SCOPE (self);
   GstFlowReturn fret = GST_FLOW_OK;
   guint chan_id = 0;
   gboolean bret = FALSE;
@@ -4845,6 +4905,7 @@ gst_vvas_xabrscaler_chain (GstPad * pad, GstObject * parent, GstBuffer * inbuf)
      * and due to that "need_scale" flag is not set and scaling is not happening
      */
     gst_buffer_foreach_meta (outbuf, remove_infer_meta, NULL);
+    gst_buffer_foreach_meta (outbuf, remove_preprocess_meta, NULL);
 
     /* Scaling of input vvas metadata based on output resolution */
     in_meta = gst_buffer_get_meta (inbuf, gst_inference_meta_api_get_type ());
@@ -4856,6 +4917,14 @@ gst_vvas_xabrscaler_chain (GstPad * pad, GstObject * parent, GstBuffer * inbuf)
       GST_DEBUG_OBJECT (srcpad, "attaching scaled inference metadata");
       in_meta->info->transform_func (outbuf, (GstMeta *) in_meta,
           inbuf, scale_quark, &trans);
+    }
+
+    if (!gst_buffer_add_vvas_preprocess_meta (outbuf,
+            &priv->preprocess_geometry[chan_id])) {
+      GST_ERROR_OBJECT (srcpad,
+          "failed to attach preprocessing geometry metadata");
+      fret = GST_FLOW_ERROR;
+      goto error;
     }
 
     in_meta = gst_buffer_get_meta (inbuf, GST_VVAS_OVERLAY_META_API_TYPE);
@@ -4926,8 +4995,9 @@ error2:
  * register the element factories and other features
  */
 static gboolean
-vvas_xabrscaler_init (GstPlugin * vvas_xabrscaler)
+vvas_xabrscaler_init (GstPlugin *vvas_xabrscaler)
 {
+  gst_vvas_log_bridge_install ();
   /* Register the scaler element with name "vvas_xabrscaler" */
   return gst_element_register (vvas_xabrscaler, "vvas_xabrscaler",
       GST_RANK_PRIMARY, GST_TYPE_VVAS_XABRSCALER);

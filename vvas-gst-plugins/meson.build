@@ -172,6 +172,9 @@ subdir('gst-libs')
 subdir('gst')
 subdir('sys')
 subdir('pkgconfig')
+if get_option('tests').enabled()
+  subdir('tests')
+endif
 
 configure_file(output : 'config.h', configuration : cdata,
               install: true, install_dir: 'vvas/')

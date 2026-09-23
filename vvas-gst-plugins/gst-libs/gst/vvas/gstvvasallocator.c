@@ -249,8 +249,6 @@ gst_vvas_allocator_alloc (GstAllocator *allocator, gsize size,
 
   /* take buffers from free_queue as we have preallocated memory objects */
   if (priv->free_queue && g_atomic_int_get (&priv->active)) {
-    /* Note: popped memory size is not validated against requested size. */
-
   pop_now:
     mem = gst_atomic_queue_pop (priv->free_queue);
     if (G_LIKELY (mem)) {
@@ -263,6 +261,22 @@ gst_vvas_allocator_alloc (GstAllocator *allocator, gsize size,
         } else {
           /* Critical error but GstPoll already complained */
           break;
+        }
+      }
+      {
+        gsize maxsize = 0;
+
+        gst_memory_get_sizes (mem, NULL, &maxsize);
+        if (maxsize < size) {
+          GstVvasMemory *small_mem = get_vvas_mem (mem);
+
+          GST_WARNING_OBJECT (vvas_alloc,
+              "discarding undersized pooled memory %p: %lu < requested %lu",
+              mem, maxsize, size);
+          if (small_mem)
+            small_mem->do_free = TRUE;
+          gst_memory_unref (mem);
+          goto pop_now;
         }
       }
       GST_LOG_OBJECT (vvas_alloc, "popped preallocated memory %p", mem);
@@ -575,17 +589,17 @@ vvas_get_core_log_level (GstDebugLevel gst_level)
 {
   switch (gst_level) {
     case GST_LEVEL_NONE:
-      return LOG_LEVEL_NONE;
+      return VVAS_LOG_LEVEL_NONE;
     case GST_LEVEL_ERROR:
-      return LOG_LEVEL_ERROR;
+      return VVAS_LOG_LEVEL_ERROR;
     case GST_LEVEL_WARNING:
-      return LOG_LEVEL_WARNING;
+      return VVAS_LOG_LEVEL_WARNING;
     case GST_LEVEL_FIXME:
-      return LOG_LEVEL_FIXME;
+      return VVAS_LOG_LEVEL_FIXME;
     case GST_LEVEL_INFO:
-      return LOG_LEVEL_INFO;
+      return VVAS_LOG_LEVEL_INFO;
     default:
-      return LOG_LEVEL_DEBUG;
+      return VVAS_LOG_LEVEL_DEBUG;
   }
 }
 

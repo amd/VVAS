@@ -31,7 +31,7 @@
 
 #undef DUMP_REG                 // dump reg_map just before sending ert cmd
 
-static VvasLogLevel log_level = LOG_LEVEL_WARNING;
+static VvasLogLevel log_level = VVAS_LOG_LEVEL_WARNING;
 
 static const char *
 vvas_strerror (int errnum, char *errbuf, size_t errbuf_size)
@@ -56,13 +56,13 @@ vvas_alloc_buffer (VVASKernel *handle, uint32_t size, VVASMemoryType mem_type,
   VvasReturnType vret;
 
   if (!handle) {
-    LOG_ERROR (log_level, "invalid arguments : handle %p", handle);
+    VVAS_LOG_ERROR (log_level, "invalid arguments : handle %p", handle);
     goto error;
   }
 
   frame = (VVASFrame *) calloc (1, sizeof (VVASFrame));
   if (!frame) {
-    LOG_ERROR (log_level, "failed to allocate vvas_frame");
+    VVAS_LOG_ERROR (log_level, "failed to allocate vvas_frame");
     goto error;
   }
   frame->mem_type = mem_type;
@@ -72,7 +72,7 @@ vvas_alloc_buffer (VVASKernel *handle, uint32_t size, VVASMemoryType mem_type,
     vret = vvas_xrt_alloc_xrt_buffer (handle->dev_handle,
         size, VVAS_BO_FLAGS_NONE, mem_bank, &buffer);
     if (VVAS_IS_ERROR (vret)) {
-      LOG_ERROR (log_level, "failed to allocate internal memory");
+      VVAS_LOG_ERROR (log_level, "failed to allocate internal memory");
       goto error;
     }
     frame->bo[0] = buffer.bo;
@@ -84,19 +84,20 @@ vvas_alloc_buffer (VVASKernel *handle, uint32_t size, VVASMemoryType mem_type,
   } else {
     if (!props || !props->width || !props->height
         || (props->fmt == VVAS_VMFT_UNKNOWN)) {
-      LOG_ERROR (log_level, "invalid arguments for properties");
+      VVAS_LOG_ERROR (log_level, "invalid arguments for properties");
       goto error;
     }
 
     memcpy (&(frame->props), props, sizeof (VVASFrameProps));
     if (!handle->alloc_func) {
-      LOG_ERROR (log_level, "app did not set alloc_func callback function");
+      VVAS_LOG_ERROR (log_level,
+          "app did not set alloc_func callback function");
       goto error;
     }
 
     vret = handle->alloc_func (handle, frame, mem_bank, handle->cb_user_data);
     if (VVAS_IS_ERROR (vret)) {
-      LOG_ERROR (log_level, "failed to allocate frame memory");
+      VVAS_LOG_ERROR (log_level, "failed to allocate frame memory");
       goto error;
     }
   }
@@ -115,7 +116,8 @@ vvas_free_buffer (VVASKernel *handle, VVASFrame *vvas_frame)
   xrt_buffer buffer;
 
   if (!vvas_frame) {
-    LOG_ERROR (log_level, "invalid arguments : vvas_frame  %p", vvas_frame);
+    VVAS_LOG_ERROR (log_level, "invalid arguments : vvas_frame  %p",
+        vvas_frame);
     return;
   }
 
@@ -126,7 +128,7 @@ vvas_free_buffer (VVASKernel *handle, VVASFrame *vvas_frame)
     vvas_xrt_free_xrt_buffer (&buffer);
   } else if (handle) {
     if (!handle->free_func) {
-      LOG_ERROR (log_level, "app did not set free_func callback function");
+      VVAS_LOG_ERROR (log_level, "app did not set free_func callback function");
     } else {
       handle->free_func (handle, vvas_frame, handle->cb_user_data);
     }
@@ -141,12 +143,12 @@ vvas_kernel_start (VVASKernel *handle, const char *format, ...)
   VvasReturnType vret;
 
   if (!handle) {
-    LOG_ERROR (log_level, "invalid arguments : handle %p", handle);
+    VVAS_LOG_ERROR (log_level, "invalid arguments : handle %p", handle);
     return VVAS_RET_ERROR;
   }
 
   if (!format) {
-    LOG_ERROR (log_level, "invalid arguments : format %p", format);
+    VVAS_LOG_ERROR (log_level, "invalid arguments : format %p", format);
     return VVAS_RET_ERROR;
   }
 
@@ -155,11 +157,11 @@ vvas_kernel_start (VVASKernel *handle, const char *format, ...)
   vret = vvas_xrt_exec_buf (handle->dev_handle, handle->kern_handle,
       &handle->run_handle, format, args);
   if (VVAS_IS_ERROR (vret)) {
-    LOG_ERROR (log_level, "failed to issue XRT command");
+    VVAS_LOG_ERROR (log_level, "failed to issue XRT command");
     va_end (args);
     return vret;
   }
-  LOG_DEBUG (log_level, "Submitted command to kernel");
+  VVAS_LOG_DEBUG (log_level, "Submitted command to kernel");
   va_end (args);
 
   return VVAS_RET_SUCCESS;
@@ -172,27 +174,28 @@ vvas_kernel_done (VVASKernel *handle, int32_t timeout)
   int retry_count = MAX_EXEC_WAIT_RETRY_CNT;
 
   if (!handle) {
-    LOG_ERROR (log_level, "invalid arguments : handle %p", handle);
+    VVAS_LOG_ERROR (log_level, "invalid arguments : handle %p", handle);
     return VVAS_RET_ERROR;
   }
 
-  LOG_DEBUG (log_level,
+  VVAS_LOG_DEBUG (log_level,
       "kernel:%s> Going to wait for kernel command to finish", handle->name);
 
   do {
     ret = vvas_xrt_exec_wait (handle->dev_handle, handle->run_handle, timeout);
     if (ret == ERT_CMD_STATE_TIMEOUT) {
-      LOG_WARNING (log_level, "kernel=%s : Timeout...retry execwait",
+      VVAS_LOG_WARNING (log_level, "kernel=%s : Timeout...retry execwait",
           handle->name);
       if (retry_count-- <= 0) {
-        LOG_ERROR (log_level,
+        VVAS_LOG_ERROR (log_level,
             "kernel:%s> Max retry count %d reached..returning error",
             handle->name, MAX_EXEC_WAIT_RETRY_CNT);
         vvas_xrt_free_run_handle (handle->run_handle);
         return VVAS_RET_ERROR;
       }
     } else if (ret == ERT_CMD_STATE_ERROR) {
-      LOG_ERROR (log_level, "kernel:%s> ExecWait ret = %d", handle->name, ret);
+      VVAS_LOG_ERROR (log_level, "kernel:%s> ExecWait ret = %d", handle->name,
+          ret);
       vvas_xrt_free_run_handle (handle->run_handle);
       return VVAS_RET_ERROR;
     }
@@ -200,7 +203,7 @@ vvas_kernel_done (VVASKernel *handle, int32_t timeout)
 
   vvas_xrt_free_run_handle (handle->run_handle);
 
-  LOG_DEBUG (log_level,
+  VVAS_LOG_DEBUG (log_level,
       "kernel:%s> Successfully completed kernel command", handle->name);
 
   return VVAS_RET_SUCCESS;
@@ -220,7 +223,7 @@ vvas_sync_data (VVASKernel *handle, VVASSyncDataFlag flag, VVASFrame *frame)
       VVAS_BO_SYNC_BO_FROM_DEVICE;
 
   for (plane_id = 0; plane_id < frame->n_planes; plane_id++) {
-    LOG_DEBUG (log_level, "plane %d syncing %s : bo = %p, size = %d",
+    VVAS_LOG_DEBUG (log_level, "plane %d syncing %s : bo = %p, size = %d",
         plane_id,
         sync_flag == VVAS_BO_SYNC_BO_TO_DEVICE ? "to device" : "from device",
         frame->bo[plane_id], frame->size[plane_id]);
@@ -230,7 +233,7 @@ vvas_sync_data (VVASKernel *handle, VVASSyncDataFlag flag, VVASFrame *frame)
         frame->size[plane_id], 0);
     if (VVAS_IS_ERROR (vret)) {
       errnum = errno;
-      LOG_ERROR (log_level, "vvas_xrt_sync_bo failed %d, reason : %s",
+      VVAS_LOG_ERROR (log_level, "vvas_xrt_sync_bo failed %d, reason : %s",
           vret, vvas_strerror (errnum, errbuf, sizeof (errbuf)));
       return vret;
     }
@@ -407,7 +410,7 @@ vvas_caps_new (uint8_t range_height, uint32_t lower_height,
   kernelcaps *kcaps;
 
   if (lower_height == 0 && lower_width == 0) {
-    LOG_ERROR (log_level,
+    VVAS_LOG_ERROR (log_level,
         "Wrong parameter lower_width = %d, lower_width = %d\n", lower_height,
         lower_width);
     return NULL;
@@ -417,11 +420,11 @@ vvas_caps_new (uint8_t range_height, uint32_t lower_height,
       (range_width == true && (upper_width == 0 || lower_width == 0)) &&
       (lower_height == 0 && lower_width == 0)) {
 
-    LOG_ERROR (log_level, "vvas_caps_new: Wrong parameters:");
-    LOG_ERROR (log_level,
+    VVAS_LOG_ERROR (log_level, "vvas_caps_new: Wrong parameters:");
+    VVAS_LOG_ERROR (log_level,
         "range_height = %d, lower_height = %d upper_height = %d, ",
         range_height, lower_height, upper_height);
-    LOG_ERROR (log_level,
+    VVAS_LOG_ERROR (log_level,
         "range_width = %d, lower_width = %d upper_width = %d, ", range_height,
         lower_height, upper_height);
     return NULL;
@@ -442,7 +445,7 @@ vvas_caps_new (uint8_t range_height, uint32_t lower_height,
   va_end (valist);
 
   if (!num_fmt) {
-    LOG_ERROR (log_level, "vvas_caps_new: No format provided\n");
+    VVAS_LOG_ERROR (log_level, "vvas_caps_new: No format provided\n");
     free (kcaps);
     return NULL;
   }
@@ -466,7 +469,7 @@ vvas_caps_add (VVASKernel *handle, kernelcaps *kcaps, paddir dir,
   kernelpads **pads;
 
   if (sinkpad_num != 0) {
-    LOG_ERROR (log_level,
+    VVAS_LOG_ERROR (log_level,
         "vvas_caps_add_to_sink: only one pad supported yet\n");
     return false;
   }
@@ -475,7 +478,7 @@ vvas_caps_add (VVASKernel *handle, kernelcaps *kcaps, paddir dir,
     bool ret;
     ret = vvas_caps_set_pad_nature (handle, VVAS_PAD_DEFAULT);
     if (!ret) {
-      LOG_ERROR (log_level, "vvas_caps_add: failed to set pad nature\n");
+      VVAS_LOG_ERROR (log_level, "vvas_caps_add: failed to set pad nature\n");
       return false;
     }
   }
@@ -607,43 +610,43 @@ vvas_caps_print (VVASKernel *handle)
     return;
 
   pads = handle->padinfo->sinkpads;
-  LOG_DEBUG (log_level, "total sinkpad %d", handle->padinfo->nu_sinkpad);
+  VVAS_LOG_DEBUG (log_level, "total sinkpad %d", handle->padinfo->nu_sinkpad);
   if (pads) {
     for (i = 0; i < handle->padinfo->nu_sinkpad; i++) {
-      LOG_DEBUG (log_level, "nu of caps for sinkpad[%d] = %d", i,
+      VVAS_LOG_DEBUG (log_level, "nu of caps for sinkpad[%d] = %d", i,
           pads[i]->nu_caps);
-      LOG_DEBUG (log_level, "value are");
-      LOG_DEBUG (log_level,
+      VVAS_LOG_DEBUG (log_level, "value are");
+      VVAS_LOG_DEBUG (log_level,
           "range_height\tlower_height\tupper_height\trange_width\tlower_width\tupper_width\tfmt...");
       for (j = 0; j < pads[i]->nu_caps; j++) {
 
-        LOG_DEBUG (log_level, "%d\t\t%d\t\t%d\t\t%d\t\t%d\t\t%d\t\t ",
+        VVAS_LOG_DEBUG (log_level, "%d\t\t%d\t\t%d\t\t%d\t\t%d\t\t%d\t\t ",
             pads[i]->kcaps[j]->range_height, pads[i]->kcaps[j]->lower_height,
             pads[i]->kcaps[j]->upper_height, pads[i]->kcaps[j]->range_width,
             pads[i]->kcaps[j]->lower_width, pads[i]->kcaps[j]->upper_width);
         for (k = 0; k < pads[i]->kcaps[j]->num_fmt; k++)
-          LOG_DEBUG (log_level, "%d ", pads[i]->kcaps[j]->fmt[k]);
+          VVAS_LOG_DEBUG (log_level, "%d ", pads[i]->kcaps[j]->fmt[k]);
       }
     }
   }
 
   pads = handle->padinfo->srcpads;
-  LOG_DEBUG (log_level, "total srcpad %d", handle->padinfo->nu_srcpad);
+  VVAS_LOG_DEBUG (log_level, "total srcpad %d", handle->padinfo->nu_srcpad);
   if (pads) {
     for (i = 0; i < handle->padinfo->nu_srcpad; i++) {
-      LOG_DEBUG (log_level, "nu of caps for srcpad[%d] = %d", i,
+      VVAS_LOG_DEBUG (log_level, "nu of caps for srcpad[%d] = %d", i,
           pads[i]->nu_caps);
-      LOG_DEBUG (log_level, "value are");
-      LOG_DEBUG (log_level,
+      VVAS_LOG_DEBUG (log_level, "value are");
+      VVAS_LOG_DEBUG (log_level,
           "range_height\tlower_height\tupper_height\trange_width\tlower_width\tupper_width\tfmt...");
       for (j = 0; j < pads[i]->nu_caps; j++) {
 
-        LOG_DEBUG (log_level, "%d\t\t%d\t\t%d\t\t%d\t\t%d\t\t%d\t\t ",
+        VVAS_LOG_DEBUG (log_level, "%d\t\t%d\t\t%d\t\t%d\t\t%d\t\t%d\t\t ",
             pads[i]->kcaps[j]->range_height, pads[i]->kcaps[j]->lower_height,
             pads[i]->kcaps[j]->upper_height, pads[i]->kcaps[j]->range_width,
             pads[i]->kcaps[j]->lower_width, pads[i]->kcaps[j]->upper_width);
         for (k = 0; k < pads[i]->kcaps[j]->num_fmt; k++)
-          LOG_DEBUG (log_level, "%d ", pads[i]->kcaps[j]->fmt[k]);
+          VVAS_LOG_DEBUG (log_level, "%d ", pads[i]->kcaps[j]->fmt[k]);
       }
     }
   }

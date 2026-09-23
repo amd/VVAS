@@ -49,6 +49,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <gst/gst.h>
+#include <gst/vvas/gstvvaspreprocessmeta.h>
+#include <gst/vvas/gstvvaslogbridge.h>
 
 #include "gstvvas_xmetaaffixer.h"
 
@@ -82,8 +84,10 @@ enum
 /* VVAS-specific tensor formats appended to GST_XMETAAFIXER_FORMATS_ALL below. */
 #define GST_XMETAAFIXER_CUSTOM_FORMATS \
   "RGB_FLOAT, BGR_FLOAT, RGB_FLOATP, BGR_FLOATP, " \
-  "RGB_BF16, BGR_BF16, RGB_BF16P, BGR_BF16P, RGBX_BF16_C4, BGRx_BF16_C4, " \
-  "RGB_FP16, BGR_FP16, RGB_FP16P, BGR_FP16P, RGBX_FP16_C4, BGRx_FP16_C4, " \
+  "RGB_BF16, BGR_BF16, RGB_BF16P, BGR_BF16P, " \
+  "RGBX_BF16_C4, BGRX_BF16_C4, RGBX_BF16_C8, " \
+  "RGB_FP16, BGR_FP16, RGB_FP16P, BGR_FP16P, " \
+  "RGBX_FP16_C4, BGRX_FP16_C4, RGBX_FP16_C8, RGBX8_C8, " \
   "GRAY_BF16, GRAY_FP16, GRAY_FLOAT"
 
 #define GST_XMETAAFIXER_FORMATS_ALL " { ABGR64_LE, BGRA64_LE, AYUV64, ARGB64_LE, ARGB64, RGBA64_LE,\
@@ -183,7 +187,7 @@ GstFlowReturn vvas_xmetaaffixer_combined_return (GstVvas_XMetaAffixer * self);
  *           value, readability/writability and in which GStreamer state a property can be changed.
  */
 static void
-gst_vvas_xmetaaffixer_pad_class_init (GstVvas_XMetaAffixerPadClass * klass)
+gst_vvas_xmetaaffixer_pad_class_init (GstVvas_XMetaAffixerPadClass *klass)
 {
   /* Add pad class initialization code here */
 }
@@ -196,7 +200,7 @@ gst_vvas_xmetaaffixer_pad_class_init (GstVvas_XMetaAffixerPadClass * klass)
  *          allocations in object's lifecycle
  */
 static void
-gst_vvas_xmetaaffixer_pad_init (GstVvas_XMetaAffixerPad * pad)
+gst_vvas_xmetaaffixer_pad_init (GstVvas_XMetaAffixerPad *pad)
 {
   pad->collect = NULL;
   pad->srcpad = NULL;
@@ -226,7 +230,7 @@ static gboolean gst_vvas_xmetaaffixer_sink_event (GstCollectPads * pads,
  *           value, readability/writability and in which GStreamer state a property can be changed.
  */
 static void
-gst_vvas_xmetaaffixer_class_init (GstVvas_XMetaAffixerClass * klass)
+gst_vvas_xmetaaffixer_class_init (GstVvas_XMetaAffixerClass *klass)
 {
   GObjectClass *gobject_class;
   GstElementClass *gstelement_class = GST_ELEMENT_CLASS (klass);
@@ -241,7 +245,8 @@ gst_vvas_xmetaaffixer_class_init (GstVvas_XMetaAffixerClass * klass)
   gst_element_class_set_details_simple (gstelement_class,
       "AMD VVAS Metaaffixer Plugin",
       "Filter/Effect/Video",
-      "Scale Meta data as per the resolution", "AMD, Inc <https://www.amd.com>");
+      "Scale Meta data as per the resolution",
+      "AMD, Inc <https://www.amd.com>");
 
   gstelement_class->request_new_pad =
       GST_DEBUG_FUNCPTR (gst_vvas_xmetaaffixer_request_new_pad);
@@ -285,7 +290,7 @@ gst_vvas_xmetaaffixer_class_init (GstVvas_XMetaAffixerClass * klass)
  *          allocations in object's lifecycle. Instantiate pads and add them to element, set pad callback functions.
  */
 static void
-gst_vvas_xmetaaffixer_init (GstVvas_XMetaAffixer * self)
+gst_vvas_xmetaaffixer_init (GstVvas_XMetaAffixer *self)
 {
   int i;
 
@@ -336,8 +341,8 @@ gst_vvas_xmetaaffixer_init (GstVvas_XMetaAffixer * self)
  *           value type, corresponding g_value_get_xxx API will be called to get property value from GValue handle.
  */
 static void
-gst_vvas_xmetaaffixer_set_property (GObject * object,
-    guint prop_id, const GValue * value, GParamSpec * pspec)
+gst_vvas_xmetaaffixer_set_property (GObject *object,
+    guint prop_id, const GValue *value, GParamSpec *pspec)
 {
   GstVvas_XMetaAffixer *self = GST_VVAS_XMETAAFFIXER (object);
 
@@ -371,8 +376,8 @@ gst_vvas_xmetaaffixer_set_property (GObject * object,
  *           value type, corresponding g_value_get_xxx API will be called to set property value from GValue handle.
  */
 static void
-gst_vvas_xmetaaffixer_get_property (GObject * object,
-    guint prop_id, GValue * value, GParamSpec * pspec)
+gst_vvas_xmetaaffixer_get_property (GObject *object,
+    guint prop_id, GValue *value, GParamSpec *pspec)
 {
   GstVvas_XMetaAffixer *self = GST_VVAS_XMETAAFFIXER (object);
 
@@ -403,9 +408,10 @@ gst_vvas_xmetaaffixer_get_property (GObject * object,
  *  @brief  Handles GstEvent coming over the sink pad. Ex : EOS, New caps etc.
  */
 static gboolean
-gst_vvas_xmetaaffixer_sink_event (GstCollectPads * pads,
-    GstCollectData * cdata, GstEvent * event, GstVvas_XMetaAffixer * self)
+gst_vvas_xmetaaffixer_sink_event (GstCollectPads *pads,
+    GstCollectData *cdata, GstEvent *event, GstVvas_XMetaAffixer *self)
 {
+  GST_VVAS_LOG_SCOPE (self);
   GstVvas_XMetaAffixerPad *pad = GST_VVAS_XMETAAFFIXER_PAD (cdata->pad);
   gboolean discard = FALSE;
   GstSegment segment;
@@ -513,7 +519,7 @@ gst_vvas_xmetaaffixer_sink_event (GstCollectPads * pads,
  *          So free all the internal memories held by current object
  */
 static void
-gst_vvas_xmetaaffixer_finalize (GObject * obj)
+gst_vvas_xmetaaffixer_finalize (GObject *obj)
 {
   GstVvas_XMetaAffixer *self = GST_VVAS_XMETAAFFIXER (obj);
   g_cond_clear (&self->timeout_cond);
@@ -536,7 +542,7 @@ gst_vvas_xmetaaffixer_finalize (GObject * obj)
  *  @brief  Gets an iterator for the pads to which the given pad is linked to inside of the parent element.
  */
 static GstIterator *
-gst_vvas_xmetaaffixer_iterate_internal_links (GstPad * pad, GstObject * parent)
+gst_vvas_xmetaaffixer_iterate_internal_links (GstPad *pad, GstObject *parent)
 {
   GstVvas_XMetaAffixer *self = GST_VVAS_XMETAAFFIXER (parent);
   GValue val = { 0, };
@@ -605,8 +611,8 @@ gst_vvas_xmetaaffixer_iterate_internal_links (GstPad * pad, GstObject * parent)
  *          is to be created.
  */
 static GstPad *
-gst_vvas_xmetaaffixer_request_new_pad (GstElement * element,
-    GstPadTemplate * sink_templ, const gchar * name, const GstCaps * caps)
+gst_vvas_xmetaaffixer_request_new_pad (GstElement *element,
+    GstPadTemplate *sink_templ, const gchar *name, const GstCaps *caps)
 {
   GstVvas_XMetaAffixer *self = GST_VVAS_XMETAAFFIXER (element);
   GstVvas_XMetaAffixerClass *klass = GST_VVAS_XMETAAFFIXER_GET_CLASS (self);
@@ -770,7 +776,7 @@ error:
  *          performed here.
  */
 static void
-gst_vvas_xmetaaffixer_release_pad (GstElement * element, GstPad * pad)
+gst_vvas_xmetaaffixer_release_pad (GstElement *element, GstPad *pad)
 {
   GstVvas_XMetaAffixer *self = GST_VVAS_XMETAAFFIXER (element);
   GstVvas_XMetaAffixerPad *sink_pad = GST_VVAS_XMETAAFFIXER_PAD (pad);
@@ -798,7 +804,7 @@ gst_vvas_xmetaaffixer_release_pad (GstElement * element, GstPad * pad)
  *          This function creates a new GstInferenceMeta meta data object and initialize it.
  */
 GstMeta *
-create_dummy_infermeta (GstBuffer * buffer, GstVideoInfo * vinfo)
+create_dummy_infermeta (GstBuffer *buffer, GstVideoInfo *vinfo)
 {
   BoundingBox bbox;
   GstInferencePrediction *predict;
@@ -842,7 +848,7 @@ create_dummy_infermeta (GstBuffer * buffer, GstVideoInfo * vinfo)
  *  @brief  Combines last GstFlowReturn for all GstPad and computes the combined return value.
  */
 GstFlowReturn
-vvas_xmetaaffixer_combined_return (GstVvas_XMetaAffixer * self)
+vvas_xmetaaffixer_combined_return (GstVvas_XMetaAffixer *self)
 {
   GstFlowReturn fret = GST_FLOW_OK;
   int slave_idx;
@@ -873,8 +879,8 @@ vvas_xmetaaffixer_combined_return (GstVvas_XMetaAffixer * self)
  *  @brief  This function determines the minimum of buffer end time of the buffers on all pads.
  */
 static GstFlowReturn
-vvas_xmetaaffixer_get_min_end_ts (GstVvas_XMetaAffixer * self,
-    GstCollectPads * pads, GstClockTime * min_end_ts)
+vvas_xmetaaffixer_get_min_end_ts (GstVvas_XMetaAffixer *self,
+    GstCollectPads *pads, GstClockTime *min_end_ts)
 {
   GstBuffer *buffer = NULL;
   GstClockTime cur_start_ts = GST_CLOCK_TIME_NONE;
@@ -1044,10 +1050,11 @@ exit:
  *  @brief  Determine which buffer has minimum end time and attaches meta data to it and push it on output pad.
  */
 static GstFlowReturn
-vvas_xmetaaffixer_process (GstVvas_XMetaAffixer * self, GstCollectPads * pads,
+vvas_xmetaaffixer_process (GstVvas_XMetaAffixer *self, GstCollectPads *pads,
     GstClockTime min_end_ts)
 {
   GstBuffer *mbuffer = NULL;
+  GstBuffer *metadata_source_buffer = NULL;
   guint slave_idx;
   GstMeta *infer_meta = NULL;
   gboolean pick_prev_meta = FALSE;
@@ -1097,6 +1104,7 @@ vvas_xmetaaffixer_process (GstVvas_XMetaAffixer * self, GstCollectPads * pads,
   } else {
     /* Buffer is available on master sink pad. Get the meta data attached to
      * this buffer */
+    metadata_source_buffer = mbuffer;
     infer_meta =
         gst_buffer_get_meta (mbuffer, gst_inference_meta_api_get_type ());
 #if ENABLE_TEST_CODE
@@ -1227,6 +1235,7 @@ slave:
          * previous master buffer duration. Hence attach the meta data
          * from the previous buffer on the master sink pad*/
         if (self->prev_meta_buf) {
+          metadata_source_buffer = self->prev_meta_buf;
           infer_meta =
               gst_buffer_get_meta (self->prev_meta_buf,
               gst_inference_meta_api_get_type ());
@@ -1242,6 +1251,7 @@ slave:
             GST_TIME_ARGS (s_cur_start_ts),
             GST_TIME_ARGS (self->prev_m_end_ts));
         if (self->prev_meta_buf) {
+          metadata_source_buffer = self->prev_meta_buf;
           infer_meta =
               gst_buffer_get_meta (self->prev_meta_buf,
               gst_inference_meta_api_get_type ());
@@ -1269,6 +1279,8 @@ slave:
     /* Check if infer meta data to be attached is available */
     if (infer_meta) {
       const GstMetaInfo *info;
+      GstVvasPreprocessMeta *preprocess_meta = NULL;
+      gboolean geometry_transformed = FALSE;
 
       GstVideoMetaTransform trans = { &self->sink_master->vinfo,
         &sink_slave->vinfo
@@ -1282,14 +1294,53 @@ slave:
       GST_LOG_OBJECT (sink_slave, "attaching infer metadata %p to buffer %p",
           infer_meta, writable_buffer);
 
-      /* Transform the infer meta data as per the slave sink pad
-       * properties */
-      if (!pick_prev_meta)
-        info->transform_func (writable_buffer, infer_meta, mbuffer,
-            _scale_quark, &trans);
-      else
-        info->transform_func (writable_buffer, infer_meta, self->prev_meta_buf,
-            _scale_quark, &trans);
+      if (metadata_source_buffer) {
+        preprocess_meta =
+            gst_buffer_get_vvas_preprocess_meta (metadata_source_buffer);
+      }
+
+      if (preprocess_meta) {
+        GstInferenceMeta *output_meta;
+        GstInferencePrediction *prediction;
+
+        prediction = gst_inference_prediction_transform_preprocess_geometry (
+            ((GstInferenceMeta *) infer_meta)->prediction,
+            &preprocess_meta->geometry, &sink_slave->vinfo);
+        if (prediction) {
+          output_meta =
+              (GstInferenceMeta *) gst_buffer_add_meta (writable_buffer,
+              gst_inference_meta_get_info (), NULL);
+          if (!output_meta) {
+            GST_ERROR_OBJECT (sink_slave,
+                "failed to add transformed inference metadata");
+            gst_inference_prediction_unref (prediction);
+            gst_buffer_unref (writable_buffer);
+            sink_slave->fret = GST_FLOW_ERROR;
+            goto exit;
+          }
+
+          gst_inference_prediction_unref (output_meta->prediction);
+          output_meta->prediction = prediction;
+          geometry_transformed = TRUE;
+          GST_LOG_OBJECT (sink_slave,
+              "attached ROI-aware inference metadata from buffer %p",
+              metadata_source_buffer);
+        } else {
+          GST_WARNING_OBJECT (sink_slave,
+              "invalid preprocessing geometry metadata; using generic scale");
+        }
+      }
+
+      if (!geometry_transformed) {
+        /* Fall back to the existing caps-only transform when preprocessing
+         * geometry is unavailable or unsupported. */
+        if (!pick_prev_meta)
+          info->transform_func (writable_buffer, infer_meta, mbuffer,
+              _scale_quark, &trans);
+        else
+          info->transform_func (writable_buffer, infer_meta,
+              self->prev_meta_buf, _scale_quark, &trans);
+      }
     } else {
       writable_buffer = sbuffer;
     }
@@ -1461,7 +1512,7 @@ exit:
  *  @details This function is called when each input pads has atlease one buffer or reached EOS
  */
 static GstFlowReturn
-gst_vvas_xmetaaffixer_collected (GstCollectPads * pads, gpointer user_data)
+gst_vvas_xmetaaffixer_collected (GstCollectPads *pads, gpointer user_data)
 {
   GstVvas_XMetaAffixer *self = GST_VVAS_XMETAAFFIXER (user_data);
   GstClockTime min_end_ts = GST_CLOCK_TIME_NONE;
@@ -1570,11 +1621,12 @@ timeout_func (gpointer data)
  *           and this will be invoked whenever the pipeline is going into a state transition.
  */
 static GstStateChangeReturn
-gst_vvas_xmetaaffixer_change_state (GstElement * element,
+gst_vvas_xmetaaffixer_change_state (GstElement *element,
     GstStateChange transition)
 {
   GstStateChangeReturn ret;
   GstVvas_XMetaAffixer *self = GST_VVAS_XMETAAFFIXER (element);
+  GST_VVAS_LOG_SCOPE (self);
 
   switch (transition) {
     case GST_STATE_CHANGE_NULL_TO_READY:
@@ -1642,8 +1694,9 @@ gst_vvas_xmetaaffixer_change_state (GstElement * element,
  *  @brief   This is the entry point of the plug-in.
  */
 static gboolean
-vvas_xmetaaffixer_init (GstPlugin * vvas_xmetaaffixer)
+vvas_xmetaaffixer_init (GstPlugin *vvas_xmetaaffixer)
 {
+  gst_vvas_log_bridge_install ();
   /* debug category for fltering log messages
    * exchange the string 'Template vvas_xmetaaffixer' with your description
    */

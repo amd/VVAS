@@ -17,7 +17,7 @@
 gstvvas_xabrscaler = library('gstvvas_xabrscaler', 'gstvvas_xabrscaler.c',
   c_args : gst_plugins_vvas_args,
   include_directories : [configinc, libsinc],
-  dependencies : [gstvideo_dep, gst_dep, gstvvasalloc_dep, gstvvaspool_dep, dl_dep, gstallocators_dep, uuid_dep, gstvvasinfermeta_dep, gstvvashdrmeta_dep, xrm_dep, gstvvasoverlaymeta_dep, vvasstructure_dep, gstvvascoreutils_dep, vvascore_dep],
+  dependencies : [gstvideo_dep, gst_dep, gstvvasalloc_dep, gstvvaspool_dep, dl_dep, gstallocators_dep, uuid_dep, gstvvasinfermeta_dep, gstvvaspreprocessmeta_dep, gstvvashdrmeta_dep, xrm_dep, gstvvasoverlaymeta_dep, vvasstructure_dep, gstvvascoreutils_dep, vvascore_dep, gstvvaslogbridge_dep],
   install : true,
   install_dir : plugins_install_dir,
 )

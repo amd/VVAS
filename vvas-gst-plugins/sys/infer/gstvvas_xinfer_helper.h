@@ -204,6 +204,42 @@ struct Vvas_XInferFrame
   vector <VvasMemory *> *tensors;
 };
 
+/** @struct InferJobContext
+ *  @brief  Holds all state required to finalize a single inference submission.
+ *
+ *  One context represents one inference call (one batch / one infer_frames
+ *  group). For asynchronous VART inference it is heap-allocated, captured by
+ *  the execute_async callback, and deleted in the finalize function once
+ *  results have been cleaned up and queued to the post-process thread. For
+ *  synchronous inference (VART use_async=false or ONNX) it is used inline and
+ *  deleted right after the finalize call.
+ *
+ *  @c group and @c batch are sized to hold exactly their populated frames (no
+ *  nullptr padding), so their @c size() is authoritative.
+ */
+struct InferJobContext
+{
+  /** Full infer_frames group for this submission, including skip/event frames
+   *  riding along. These are forwarded to post-process in order. */
+  std::vector<Vvas_XInferFrame *> group;
+  /** Inferred subset of @c group (the frames actually sent to the runner). */
+  std::vector<Vvas_XInferFrame *> batch;
+  /** Whether HW (zero-copy) input tensors were used. */
+  bool hw_input;
+  /** Whether HW (zero-copy) output tensors were used. */
+  bool hw_output;
+  /** Mapped input frames (kept alive until the callback; non-HW input only). */
+  std::vector<VvasVideoFrameMapInfo> mapped_inputs;
+  /** Mapped output tensor memories (kept alive until the callback; non-HW output only). */
+  std::vector<std::vector<VvasMemoryMapInfo>> mapped_outputs;
+  /** VART input tensors (kept alive until the callback). */
+  std::optional<std::vector<std::vector<vart::NpuTensor>>> vart_in;
+  /** VART output tensors (kept alive until the callback). */
+  std::optional<std::vector<std::vector<vart::NpuTensor>>> vart_out;
+  /** Profiler start timestamp (microseconds); 0 when profiling disabled. */
+  guint64 t0_us;
+};
+
 struct PreProcessInfo
 {
   /* Is pre processing enabled?*/
@@ -299,6 +335,8 @@ struct OnnxRTInfo
   std::string model_path;
   /* memory layout of the input tensor */
   std::string input_tensor_layout;
+  /* Optional ONNX output layout override; unset leaves memory_layout empty */
+  std::string output_tensor_layout;
   /* Onnx Session context */
   std::unique_ptr<Ort::Session> session = nullptr;
   /* ONNX Runtime environment */
@@ -347,6 +385,12 @@ struct VartInfo
 
   /* Path to vitis_ai_config json file */
   std::string config_file_path;
+
+  /* Use asynchronous inference (Runner::execute_async with callback).
+   * When false, synchronous Runner::execute is used. Async-by-default:
+   * this matches read_vart_config(), which defaults "use-async" to true
+   * when the JSON key is absent. */
+  bool use_async {true};
 };
 
 enum class MLRuntime
@@ -447,6 +491,16 @@ struct InferInfo
   gboolean attach_ppebuf;
   /** State of Infer thread */
   atomic<VvasThreadState> thread_state;
+
+  /* Async inference state (used only when vart_info.use_async is true).
+   * async_in_flight counts submitted-but-not-yet-finalized async jobs.
+   * It is NOT a submission cap (backpressure comes from the blocking
+   * tensor pool); it is used only as a drain barrier so no-inference
+   * groups (EOS/event/skip-only) and thread exit cannot overtake
+   * in-flight async results. */
+  std::atomic<guint> async_in_flight;
+  GMutex async_lock;
+  GCond async_cond;
 
   /* filtering members */
   GList *input_class_filters;
@@ -562,6 +616,26 @@ get_tensor_format (VvasVideoFormat model_format, std::string& layout, VvasTensor
  */
 VvasVideoFormat
 get_tensor_format (VvasVideoFormat model_format, vart::MemoryLayout layout, VvasTensorDataType data_type);
+
+/**
+ * @brief Infer a preprocess-compatible layout for a GENERIC input tensor.
+ *
+ * - 4D tensor with shape[1] in {3,4} -> NCHW
+ * - 4D tensor with shape[3] in {3,4} -> NHWC
+ *
+ * @param tensor          Input tensor metadata from the VART runner.
+ * @param inferred_layout Resolved layout on success.
+ * @param inferred_width  Resolved width on success.
+ * @param inferred_height Resolved height on success.
+ * @param error_reason    Failure reason when false is returned.
+ * @return TRUE when the shape can be mapped for preprocessing.
+ */
+gboolean
+infer_generic_preprocess_layout (const vart::NpuTensorInfo& tensor,
+    vart::MemoryLayout& inferred_layout,
+    uint32_t& inferred_width,
+    uint32_t& inferred_height,
+    std::string& error_reason);
 
 
 /**

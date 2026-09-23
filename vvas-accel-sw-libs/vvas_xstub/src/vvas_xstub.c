@@ -104,26 +104,26 @@ xlnx_kernel_init (VVASKernel *handle)
 
   /* kernel specification info is required to validate kernel library */
   if (handle->kernel_config == NULL) {
-    LOG_MESSAGE (LOG_LEVEL_ERROR, LOG_LEVEL_WARNING,
+    VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_ERROR, VVAS_LOG_LEVEL_WARNING,
         "json object for static kernel configuration is NOT available");
     return VVAS_RET_ERROR;
   }
 
   kpriv = (VVASXStub *) calloc (1, sizeof (VVASXStub));
   if (!kpriv) {
-    LOG_MESSAGE (LOG_LEVEL_ERROR, LOG_LEVEL_WARNING,
+    VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_ERROR, VVAS_LOG_LEVEL_WARNING,
         "failed to allocate private handle\n");
     return VVAS_RET_ERROR;
   }
 
   val = json_object_get (handle->kernel_config, "debug-level");
   if (!val || !json_is_integer (val))
-    kpriv->log_level = LOG_LEVEL_WARNING;
+    kpriv->log_level = VVAS_LOG_LEVEL_WARNING;
   else
     kpriv->log_level = json_integer_value (val);
 
   static_cfg = json_dumps (handle->kernel_config, JSON_INDENT (2));
-  LOG_MESSAGE (LOG_LEVEL_DEBUG, kpriv->log_level,
+  VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_DEBUG, kpriv->log_level,
       "static kernel json config :\n%s", static_cfg);
   free (static_cfg);
 
@@ -131,94 +131,94 @@ xlnx_kernel_init (VVASKernel *handle)
 
   val = json_object_get (handle->kernel_config, "in-mem-bank");
   if (!json_is_integer (val)) {
-    LOG_MESSAGE (LOG_LEVEL_INFO, kpriv->log_level,
+    VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_INFO, kpriv->log_level,
         "in-mem-bank is not set, setting it to %d", STUB_DEFAULT_MEM_BANK);
     handle->in_mem_bank = STUB_DEFAULT_MEM_BANK;
   } else {
     handle->in_mem_bank = json_integer_value (val);
-    LOG_MESSAGE (LOG_LEVEL_INFO, kpriv->log_level,
+    VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_INFO, kpriv->log_level,
         "in-mem-bank is set to %lld", json_integer_value (val));
   }
 
   val = json_object_get (handle->kernel_config, "out-mem-bank");
   if (!json_is_integer (val)) {
-    LOG_MESSAGE (LOG_LEVEL_INFO, kpriv->log_level,
+    VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_INFO, kpriv->log_level,
         "out-mem-bank is not set, setting it to %d", STUB_DEFAULT_MEM_BANK);
     handle->out_mem_bank = STUB_DEFAULT_MEM_BANK;
   } else {
     handle->out_mem_bank = json_integer_value (val);
-    LOG_MESSAGE (LOG_LEVEL_INFO, kpriv->log_level,
+    VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_INFO, kpriv->log_level,
         "out-mem-bank is set to %lld", json_integer_value (val));
   }
 
   /* getting kernel-lib-type for validations of VVAS handles */
   val = json_object_get (handle->kernel_config, "kernel-lib-type");
   if (!json_is_string (val)) {
-    LOG_MESSAGE (LOG_LEVEL_ERROR, kpriv->log_level,
+    VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_ERROR, kpriv->log_level,
         "failed to get kernel-lib-type\n");
     return VVAS_RET_ERROR;
   }
 
   kpriv->kernel_type = get_kernel_lib_type (json_string_value (val));
   if (kpriv->kernel_type == VVAS_KERNEL_LIB_TYPE_UNKNOWN) {
-    LOG_MESSAGE (LOG_LEVEL_ERROR, kpriv->log_level,
+    VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_ERROR, kpriv->log_level,
         "unknown kernel lib type : %s\n", json_string_value (val));
     return VVAS_RET_ERROR;
   }
-  LOG_MESSAGE (LOG_LEVEL_INFO, kpriv->log_level, "kernel library type : %s\n",
-      json_string_value (val));
+  VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_INFO, kpriv->log_level,
+      "kernel library type : %s\n", json_string_value (val));
 
   /* Log dev_handle to verify XRT device context availability */
-  LOG_MESSAGE (LOG_LEVEL_DEBUG, kpriv->log_level,
+  VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_DEBUG, kpriv->log_level,
       "Device handle: %p (NULL indicates software-only mode)",
       handle->dev_handle);
 
   if (kpriv->kernel_type == VVAS_KERNEL_LIB_TYPE_SOFTLIB) {
     /* kernel library is for software library */
     if (handle->dev_handle) {
-      LOG_MESSAGE (LOG_LEVEL_WARNING, kpriv->log_level,
+      VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_WARNING, kpriv->log_level,
           "XRT device context available for soft-lib (xclbin-location set)");
     }
 
     if (handle->alloc_func) {
-      LOG_MESSAGE (LOG_LEVEL_WARNING, kpriv->log_level,
+      VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_WARNING, kpriv->log_level,
           "Buffer allocation callback registered by GStreamer plugin");
     }
 
     if (handle->free_func) {
-      LOG_MESSAGE (LOG_LEVEL_WARNING, kpriv->log_level,
+      VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_WARNING, kpriv->log_level,
           "Buffer free callback registered by GStreamer plugin");
     }
 
     if (handle->cb_user_data == NULL) {
-      LOG_MESSAGE (LOG_LEVEL_WARNING, kpriv->log_level,
+      VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_WARNING, kpriv->log_level,
           "Callback user data not set (may be intentional)");
     }
 
     val = json_object_get (handle->kernel_config, "element-mode");
     if (!json_is_string (val)) {
-      LOG_MESSAGE (LOG_LEVEL_ERROR, kpriv->log_level,
+      VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_ERROR, kpriv->log_level,
           "failed to get element-mode in kernel config\n");
       return VVAS_RET_ERROR;
     }
 
     kpriv->element_mode = get_element_mode (json_string_value (val));
     if (kpriv->element_mode == VVAS_ELEMENT_MODE_NOT_SUPPORTED) {
-      LOG_MESSAGE (LOG_LEVEL_ERROR, kpriv->log_level,
+      VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_ERROR, kpriv->log_level,
           "Unsupported element mode : %s\n", json_string_value (val));
       return VVAS_RET_ERROR;
     }
   } else if (kpriv->kernel_type == VVAS_KERNEL_LIB_TYPE_HARDKERNEL
       || kpriv->kernel_type == VVAS_KERNEL_LIB_TYPE_PSKERNEL) {
     if (handle->dev_handle == NULL) {
-      LOG_MESSAGE (LOG_LEVEL_ERROR, kpriv->log_level,
+      VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_ERROR, kpriv->log_level,
           "dev_handle is not allocated by gstplugin");
       return VVAS_RET_ERROR;
     }
 #ifdef XLNX_PCIe_PLATFORM
     if (kpriv->kernel_type == VVAS_KERNEL_LIB_TYPE_PSKERNEL
         && !handle->is_ps_kernel) {
-      LOG_MESSAGE (LOG_LEVEL_ERROR, kpriv->log_level,
+      VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_ERROR, kpriv->log_level,
           "is_ps_kernel is false when library is PSKERNEL type");
       return VVAS_RET_ERROR;
     }
@@ -228,21 +228,21 @@ xlnx_kernel_init (VVASKernel *handle)
   val = json_object_get (handle->kernel_config, "src-stride-align");
   if (val && json_is_integer (val)) {
     vvas_caps_set_src_stride_align (handle, json_integer_value (val));
-    LOG_MESSAGE (LOG_LEVEL_DEBUG, kpriv->log_level,
+    VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_DEBUG, kpriv->log_level,
         "Setting the src stride align value as %lld", json_integer_value (val));
   }
 
   val = json_object_get (handle->kernel_config, "src-height-align");
   if (val && json_is_integer (val)) {
     vvas_caps_set_src_height_align (handle, json_integer_value (val));
-    LOG_MESSAGE (LOG_LEVEL_DEBUG, kpriv->log_level,
+    VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_DEBUG, kpriv->log_level,
         "Setting the src height align value as %lld", json_integer_value (val));
   }
 
   val = json_object_get (handle->kernel_config, "sink-stride-align");
   if (val && json_is_integer (val)) {
     vvas_caps_set_sink_stride_align (handle, json_integer_value (val));
-    LOG_MESSAGE (LOG_LEVEL_DEBUG, kpriv->log_level,
+    VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_DEBUG, kpriv->log_level,
         "Setting the sink stride align value as %lld",
         json_integer_value (val));
   }
@@ -250,12 +250,13 @@ xlnx_kernel_init (VVASKernel *handle)
   val = json_object_get (handle->kernel_config, "sink-height-align");
   if (val && json_is_integer (val)) {
     vvas_caps_set_sink_height_align (handle, json_integer_value (val));
-    LOG_MESSAGE (LOG_LEVEL_DEBUG, kpriv->log_level,
+    VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_DEBUG, kpriv->log_level,
         "Setting the sink height align value as %lld",
         json_integer_value (val));
   }
 
-  LOG_MESSAGE (LOG_LEVEL_DEBUG, kpriv->log_level, "STUB Init Successfull");
+  VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_DEBUG, kpriv->log_level,
+      "STUB Init Successfull");
   return VVAS_RET_SUCCESS;
 }
 
@@ -265,7 +266,7 @@ xlnx_kernel_deinit (VVASKernel *handle)
   VVASXStub *kpriv = (VVASXStub *) handle->kernel_priv;
 
   if (kpriv) {
-    LOG_MESSAGE (LOG_LEVEL_DEBUG, kpriv->log_level, "enter");
+    VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_DEBUG, kpriv->log_level, "enter");
     free (kpriv);
   }
 
@@ -287,13 +288,13 @@ modify_input_frame_inplace (VVASKernel *handle, VVASFrame *frame)
   uint32_t rect_x, rect_y, rect_w, rect_h;
 
   if (kpriv->kernel_type != VVAS_KERNEL_LIB_TYPE_SOFTLIB) {
-    LOG_MESSAGE (LOG_LEVEL_INFO, kpriv->log_level,
+    VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_INFO, kpriv->log_level,
         "Inplace modification only supported for soft-lib mode");
     return;
   }
 
   if (!frame->vaddr[0]) {
-    LOG_MESSAGE (LOG_LEVEL_WARNING, kpriv->log_level,
+    VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_WARNING, kpriv->log_level,
         "No virtual address available for inplace modification");
     return;
   }
@@ -308,7 +309,7 @@ modify_input_frame_inplace (VVASKernel *handle, VVASFrame *frame)
   rect_w = width / 2;
   rect_h = height / 2;
 
-  LOG_MESSAGE (LOG_LEVEL_INFO, kpriv->log_level,
+  VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_INFO, kpriv->log_level,
       "Drawing white rectangle at (%u,%u) size %ux%u on frame %ux%u fmt=%u stride=%u",
       rect_x, rect_y, rect_w, rect_h, width, height, frame->props.fmt, stride);
 
@@ -324,7 +325,7 @@ modify_input_frame_inplace (VVASKernel *handle, VVASFrame *frame)
         uint8_t *row = base + (y * stride) + (rect_x * bytes_per_pixel);
         memset (row, 255, rect_w * bytes_per_pixel);
       }
-      LOG_MESSAGE (LOG_LEVEL_DEBUG, kpriv->log_level,
+      VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_DEBUG, kpriv->log_level,
           "RGB/BGR rectangle drawn");
       break;
     }
@@ -358,7 +359,8 @@ modify_input_frame_inplace (VVASKernel *handle, VVASFrame *frame)
           }
         }
       }
-      LOG_MESSAGE (LOG_LEVEL_DEBUG, kpriv->log_level, "NV12 rectangle drawn");
+      VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_DEBUG, kpriv->log_level,
+          "NV12 rectangle drawn");
       break;
     }
 
@@ -371,7 +373,7 @@ modify_input_frame_inplace (VVASKernel *handle, VVASFrame *frame)
         uint8_t *row = base + (y * stride) + rect_x;
         memset (row, 255, rect_w);
       }
-      LOG_MESSAGE (LOG_LEVEL_DEBUG, kpriv->log_level,
+      VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_DEBUG, kpriv->log_level,
           "Y8/GRAY8 rectangle drawn");
       break;
     }
@@ -407,7 +409,8 @@ modify_input_frame_inplace (VVASKernel *handle, VVASFrame *frame)
           memset (v_base + (y * uv_stride) + uv_rect_x, 128, uv_rect_w);
         }
       }
-      LOG_MESSAGE (LOG_LEVEL_DEBUG, kpriv->log_level, "I420 rectangle drawn");
+      VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_DEBUG, kpriv->log_level,
+          "I420 rectangle drawn");
       break;
     }
 
@@ -429,13 +432,13 @@ modify_input_frame_inplace (VVASKernel *handle, VVASFrame *frame)
           row[x * 4 + 3] = 255; /* A or B */
         }
       }
-      LOG_MESSAGE (LOG_LEVEL_DEBUG, kpriv->log_level,
+      VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_DEBUG, kpriv->log_level,
           "RGBX/ARGB rectangle drawn");
       break;
     }
 
     default:
-      LOG_MESSAGE (LOG_LEVEL_WARNING, kpriv->log_level,
+      VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_WARNING, kpriv->log_level,
           "Inplace rectangle not implemented for format %u", frame->props.fmt);
       break;
   }
@@ -448,19 +451,19 @@ validate_vvas_frame (VVASKernel *handle, VVASFrame *frame)
   VVASXStub *kpriv = (VVASXStub *) handle->kernel_priv;
 
   if (frame->n_planes > VIDEO_MAX_PLANES) {
-    LOG_MESSAGE (LOG_LEVEL_ERROR, kpriv->log_level,
+    VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_ERROR, kpriv->log_level,
         "wrong number of planes in frame %u", frame->n_planes);
     return -1;
   }
   for (p = 0; p < frame->n_planes; p++) {
-    LOG_MESSAGE (LOG_LEVEL_INFO, kpriv->log_level,
+    VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_INFO, kpriv->log_level,
         "plane %d : bo %p vaddr %p paddr %p size %u", p, frame->bo[p],
         frame->vaddr[p], (void *) frame->paddr[p], frame->size[p]);
 
     if (kpriv->kernel_type == VVAS_KERNEL_LIB_TYPE_HARDKERNEL
         || kpriv->kernel_type == VVAS_KERNEL_LIB_TYPE_PSKERNEL) {
       if (frame->paddr[p] == 0 || frame->paddr[p] == (uint64_t) - 1) {
-        LOG_MESSAGE (LOG_LEVEL_ERROR, kpriv->log_level,
+        VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_ERROR, kpriv->log_level,
             "not valid physical address %lu", frame->paddr[p]);
         return -1;
       }
@@ -469,29 +472,29 @@ validate_vvas_frame (VVASKernel *handle, VVASFrame *frame)
        * but, if gstplugin assigns this it might have resulted DMA copy in PCIe platforms
        */
       if (frame->vaddr[p]) {
-        LOG_MESSAGE (LOG_LEVEL_WARNING, kpriv->log_level,
+        VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_WARNING, kpriv->log_level,
             "vaddr %p available..possibility of DMA copy and hence performance drop",
             frame->vaddr[p]);
       }
     } else {
       if (frame->vaddr[p] == 0 || (uint64_t) frame->vaddr[p] == (uint64_t) - 1) {
-        LOG_MESSAGE (LOG_LEVEL_ERROR, kpriv->log_level,
+        VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_ERROR, kpriv->log_level,
             "not valid virtual address %p", (void *) frame->paddr[p]);
         return -1;
       }
 
       if (frame->paddr[p]) {
-        LOG_MESSAGE (LOG_LEVEL_WARNING, kpriv->log_level,
+        VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_WARNING, kpriv->log_level,
             "paddr %p availble.. but not required here as kernel type is softlib",
             frame->vaddr[p]);
       }
     }
   }
-  LOG_MESSAGE (LOG_LEVEL_INFO, kpriv->log_level,
+  VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_INFO, kpriv->log_level,
       "frame props : width %u, height %u, stride %u, fmt %u",
       frame->props.width, frame->props.height, frame->props.stride,
       frame->props.fmt);
-  LOG_MESSAGE (LOG_LEVEL_INFO, kpriv->log_level,
+  VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_INFO, kpriv->log_level,
       "meta_data %p, app_priv %p, mem_type %u, n_planes %u",
       frame->meta_data, frame->app_priv, frame->mem_type, frame->n_planes);
   return 0;
@@ -513,7 +516,7 @@ xlnx_kernel_start (VVASKernel *handle, int start,
   uint16_t user_mem_bank;
   uint32_t user_buf_size;
 
-  LOG_MESSAGE (LOG_LEVEL_DEBUG, kpriv->log_level, "enter");
+  VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_DEBUG, kpriv->log_level, "enter");
 
   /**************************************************
    *********** Input frames validation **************
@@ -522,20 +525,20 @@ xlnx_kernel_start (VVASKernel *handle, int start,
     if (input[idx]) {
       VVASFrame *inframe = input[idx];
 
-      LOG_MESSAGE (LOG_LEVEL_INFO, kpriv->log_level,
+      VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_INFO, kpriv->log_level,
           "----- Input frame index %d -----", idx);
       ret = validate_vvas_frame (handle, inframe);
       if (ret < 0) {
         return VVAS_RET_ERROR;
       }
-      LOG_MESSAGE (LOG_LEVEL_INFO, kpriv->log_level,
+      VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_INFO, kpriv->log_level,
           "----------------------------");
 
       idx++;
     } else
       break;
   }
-  LOG_MESSAGE (LOG_LEVEL_INFO, kpriv->log_level,
+  VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_INFO, kpriv->log_level,
       "number of input frames received : %d", idx);
 
   /**************************************************
@@ -549,19 +552,19 @@ xlnx_kernel_start (VVASKernel *handle, int start,
       if (output[idx]) {
         VVASFrame *outframe = output[idx];
 
-        LOG_MESSAGE (LOG_LEVEL_INFO, kpriv->log_level,
+        VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_INFO, kpriv->log_level,
             "----- Output frame index %d -----", idx);
         ret = validate_vvas_frame (handle, outframe);
         if (ret < 0) {
           return VVAS_RET_ERROR;
         }
-        LOG_MESSAGE (LOG_LEVEL_INFO, kpriv->log_level,
+        VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_INFO, kpriv->log_level,
             "----------------------------");
         idx++;
       } else
         break;
     }
-    LOG_MESSAGE (LOG_LEVEL_INFO, kpriv->log_level,
+    VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_INFO, kpriv->log_level,
         "number of output frames received : %d", idx);
 
     /* In transform mode, copy input data to output buffer */
@@ -573,7 +576,7 @@ xlnx_kernel_start (VVASKernel *handle, int start,
         VVASFrame *outframe = output[frame_idx];
         int p;
 
-        LOG_MESSAGE (LOG_LEVEL_INFO, kpriv->log_level,
+        VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_INFO, kpriv->log_level,
             "Transform mode: copying input frame %d to output", frame_idx);
 
         /* Copy each plane from input to output */
@@ -625,11 +628,11 @@ xlnx_kernel_start (VVASKernel *handle, int start,
           if (inframe->vaddr[p] && outframe->vaddr[p] && in_size > 0) {
             size_t copy_size = (in_size < out_size) ? in_size : out_size;
             memcpy (outframe->vaddr[p], inframe->vaddr[p], copy_size);
-            LOG_MESSAGE (LOG_LEVEL_DEBUG, kpriv->log_level,
+            VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_DEBUG, kpriv->log_level,
                 "Copied plane %d: %zu bytes from %p to %p",
                 p, copy_size, inframe->vaddr[p], outframe->vaddr[p]);
           } else {
-            LOG_MESSAGE (LOG_LEVEL_WARNING, kpriv->log_level,
+            VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_WARNING, kpriv->log_level,
                 "Plane %d: vaddr not available for copy (in=%p, out=%p) or size is 0",
                 p, inframe->vaddr[p], outframe->vaddr[p]);
           }
@@ -639,7 +642,7 @@ xlnx_kernel_start (VVASKernel *handle, int start,
     }
   } else {
     /* no output buffers in case of passthrough/inplace mode */
-    LOG_MESSAGE (LOG_LEVEL_INFO, kpriv->log_level,
+    VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_INFO, kpriv->log_level,
         "number of output frames received : %d", idx);
     idx = 0;
     while (idx < MAX_NUM_OBJECT) {
@@ -647,13 +650,13 @@ xlnx_kernel_start (VVASKernel *handle, int start,
         if (kpriv->element_mode == VVAS_ELEMENT_MODE_IN_PLACE) {
           VVASFrame *inframe = input[idx];
 
-          LOG_MESSAGE (LOG_LEVEL_INFO, kpriv->log_level,
+          VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_INFO, kpriv->log_level,
               "Modifying the input %d in inplace mode", idx);
           modify_input_frame_inplace (handle, inframe);
 
 
         } else if (kpriv->element_mode == VVAS_ELEMENT_MODE_PASSTHROUGH) {
-          LOG_MESSAGE (LOG_LEVEL_INFO, kpriv->log_level,
+          VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_INFO, kpriv->log_level,
               "input %d is passthrough", idx);
         }
 
@@ -690,7 +693,7 @@ xlnx_kernel_start (VVASKernel *handle, int start,
       &user_frame_props);
 
   if (user_frame == NULL) {
-    LOG_MESSAGE (LOG_LEVEL_ERROR, kpriv->log_level,
+    VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_ERROR, kpriv->log_level,
         "Couldn't allocate vvas frame");
     return VVAS_RET_ERROR;
   }
@@ -699,30 +702,30 @@ xlnx_kernel_start (VVASKernel *handle, int start,
     GstVideoMeta *vmeta;
     GstBuffer *buffer = (GstBuffer *) user_frame->app_priv;
     int p;
-    LOG_MESSAGE (LOG_LEVEL_INFO, kpriv->log_level,
+    VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_INFO, kpriv->log_level,
         "Allocated vvas frame from gst memory pool %d", user_frame->n_planes);
 
     vmeta = gst_buffer_get_video_meta (buffer);
     if (vmeta == NULL) {
-      LOG_MESSAGE (LOG_LEVEL_ERROR, kpriv->log_level,
+      VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_ERROR, kpriv->log_level,
           "Could not find vmeta in gst buffer");
 
       return VVAS_RET_ERROR;
     }
 
 
-    LOG_MESSAGE (LOG_LEVEL_INFO, kpriv->log_level,
+    VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_INFO, kpriv->log_level,
         "Gst Buffer height %d width %d Planes %d", vmeta->height,
         vmeta->width, vmeta->n_planes);
 
 
     for (p = 0; p < vmeta->n_planes; p++) {
-      LOG_MESSAGE (LOG_LEVEL_INFO, kpriv->log_level,
+      VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_INFO, kpriv->log_level,
           "stride of plane_%d is %d ", p, vmeta->stride[p]);
     }
 
     for (p = 0; p < user_frame->n_planes; p++) {
-      LOG_MESSAGE (LOG_LEVEL_INFO, kpriv->log_level,
+      VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_INFO, kpriv->log_level,
           "plane %d : bo %p vaddr %p paddr %p size %u", p,
           user_frame->bo[p], user_frame->vaddr[p],
           (void *) user_frame->paddr[p], user_frame->size[p]);
@@ -746,18 +749,18 @@ xlnx_kernel_start (VVASKernel *handle, int start,
         NULL);
 
     if (user_frame == NULL) {
-      LOG_MESSAGE (LOG_LEVEL_ERROR, kpriv->log_level,
+      VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_ERROR, kpriv->log_level,
           "Couldn't allocate vvas frame from internal memory");
       return VVAS_RET_ERROR;
     }
 
     if (user_frame->bo[0]) {
       int p = 0;
-      LOG_MESSAGE (LOG_LEVEL_INFO, kpriv->log_level,
+      VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_INFO, kpriv->log_level,
           "Allocated vvas frame from internal memory (dev_handle=%p)",
           handle->dev_handle);
 
-      LOG_MESSAGE (LOG_LEVEL_INFO, kpriv->log_level,
+      VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_INFO, kpriv->log_level,
           "plane %d : bo %p vaddr %p paddr %p size %u", p, user_frame->bo[0],
           user_frame->vaddr[0], (void *) user_frame->paddr[0],
           user_frame->size[0]);
@@ -766,12 +769,12 @@ xlnx_kernel_start (VVASKernel *handle, int start,
 
     vvas_free_buffer (handle, user_frame);
   } else {
-    LOG_MESSAGE (LOG_LEVEL_DEBUG, kpriv->log_level,
+    VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_DEBUG, kpriv->log_level,
         "Skipping VVAS_INTERNAL_MEMORY test (no dev_handle available)");
   }
 
   dynamic_cfg = json_dumps (handle->kernel_dyn_config, JSON_INDENT (2));
-  LOG_MESSAGE (LOG_LEVEL_DEBUG, kpriv->log_level,
+  VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_DEBUG, kpriv->log_level,
       "dynamic kernel json config :\n%s", dynamic_cfg);
 
   return VVAS_RET_SUCCESS;
@@ -782,6 +785,6 @@ xlnx_kernel_done (VVASKernel *handle)
 {
   VVASXStub *kpriv = (VVASXStub *) handle->kernel_priv;
 
-  LOG_MESSAGE (LOG_LEVEL_DEBUG, kpriv->log_level, "Kernel Done\n");
+  VVAS_LOG_MESSAGE (VVAS_LOG_LEVEL_DEBUG, kpriv->log_level, "Kernel Done\n");
   return VVAS_RET_SUCCESS;
 }

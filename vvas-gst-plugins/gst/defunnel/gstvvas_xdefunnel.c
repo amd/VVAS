@@ -30,6 +30,7 @@
 
 #include "gstvvas_xdefunnel.h"
 #include <gst/vvas/gstvvassrcidmeta.h>
+#include <gst/vvas/gstvvaslogbridge.h>
 
 /**
  *  @brief Defines a static GstDebugCategory global variable "gst_vvas_xdefunnel_debug_category"
@@ -734,6 +735,7 @@ gst_vvas_xdefunnel_change_state (GstElement *element, GstStateChange transition)
 static gboolean
 vvas_xdefunnel_init (GstPlugin *vvas_xdefunnel)
 {
+  gst_vvas_log_bridge_install ();
   return gst_element_register (vvas_xdefunnel, "vvas_xdefunnel",
       GST_RANK_PRIMARY, GST_TYPE_VVAS_XDEFUNNEL);
 }

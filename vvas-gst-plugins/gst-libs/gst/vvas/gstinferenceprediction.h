@@ -32,6 +32,7 @@
 
 #include <vvas_core/vvas_infer_prediction.h>
 #include <gst/video/video.h>
+#include <gst/vvas/gstvvaspreprocessmeta.h>
 #include <vvas/vvasmeta.h>
 #include <math.h>
 #include <stdbool.h>
@@ -211,6 +212,23 @@ void gst_inference_prediction_append_classification (GstInferencePrediction *
  */
 GstInferencePrediction *gst_inference_prediction_scale (GstInferencePrediction *
     self, GstVideoInfo * to, GstVideoInfo * from);
+
+/**
+ * gst_inference_prediction_transform_preprocess_geometry:
+ * @self: prediction tree in tensor coordinates
+ * @geometry: effective source and destination preprocessing rectangles
+ * @to: video information for the destination frame
+ *
+ * Creates a deep copy of @self and maps its results from the tensor content
+ * rectangle back into the source rectangle recorded by preprocessing.
+ *
+ * Returns: a newly allocated transformed prediction, or %NULL when @geometry
+ * is invalid or unsupported.
+ */
+GstInferencePrediction *
+gst_inference_prediction_transform_preprocess_geometry (
+    GstInferencePrediction *self,
+    const GstVvasPreprocessGeometry *geometry, GstVideoInfo *to);
 
 /**
  * gst_inference_prediction_scale_ip:

@@ -58,13 +58,7 @@
           3
         ],
         "anchors": [],
-        "is-scaling-required": "false",
-        "input-layout": [
-          "NCHW"
-        ],
-        "output-layout": [
-          "NHC"
-        ]
+        "is-scaling-required": "false"
       }
     }
   }

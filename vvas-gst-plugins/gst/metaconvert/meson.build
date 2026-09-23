@@ -18,7 +18,7 @@
 gstvvas_xmetaconvert = library('gstvvas_xmetaconvert', 'gstvvas_xmetaconvert.c',
   c_args : gst_plugins_vvas_args,
   include_directories : [configinc, libsinc],
-  dependencies : [gstvideo_dep, gst_dep, gstvvasinfermeta_dep, gstvvasoverlaymeta_dep, vvascore_dep, gstvvascoreutils_dep],
+  dependencies : [gstvideo_dep, gst_dep, gstvvasinfermeta_dep, gstvvasoverlaymeta_dep, vvascore_dep, gstvvascoreutils_dep, gstvvaslogbridge_dep],
   install : true,
   install_dir : plugins_install_dir,
 )

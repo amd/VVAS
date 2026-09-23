@@ -102,7 +102,7 @@ To add support for a new model:
 4. Parse any user-facing options from `library-config`.
 5. Implement tensor decoding and result creation in `postprocess_run()`.
 6. Add a `library(...)` target for the new source file in `meson.build`.
-7. Rebuild and install `vvas-dev`.
+7. Rebuild and install VVAS.
 8. Set `postprocess-config.library-path` to the installed `.so`.
 
 Minimal C++ structure:
@@ -275,8 +275,8 @@ the model's prediction count.
 
 ## Build and Install
 
-These samples are built as part of `vvas-dev`. After sourcing the target
-SDK environment, build and install `vvas-dev` using the standard repository
+These samples are built as part of VVAS. After sourcing the target
+SDK environment, build and install VVAS using the standard repository
 script:
 
 ```bash

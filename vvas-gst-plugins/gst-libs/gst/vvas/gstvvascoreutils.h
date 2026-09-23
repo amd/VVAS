@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2020 - 2022 Xilinx, Inc.
- * Copyright (C) 2022 - 2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022 - 2026 Advanced Micro Devices, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -36,7 +36,7 @@
 #include <vvas_core/vvas_image_process.h>
 #include "gstinferenceprediction.h"
 
-#define DEFAULT_DEBUG_LOG_LEVEL LOG_LEVEL_ERROR
+#define DEFAULT_DEBUG_LOG_LEVEL VVAS_LOG_LEVEL_ERROR
 #ifdef __cplusplus
 extern "C"
 {
@@ -104,6 +104,19 @@ GST_EXPORT
 VvasVideoFrame *vvas_videoframe_from_gstbuffer (VvasContext *vvas_ctx,
                                                 int8_t mbank_idx, GstBuffer * buf, GstVideoInfo * gst_vinfo,
                                                 GstMapFlags flags);
+
+/**
+ *  @fn gboolean gst_vvas_buffer_make_dmabuf_memory_writable
+ *      (GstBuffer **buf)
+ *  @param [in/out] buf - GstBuffer to wrap with a writable DMA-BUF alias
+ *  @return TRUE on success, FALSE on failure
+ *  @brief  Replace non-writable DMA-BUF GstMemory with a writable alias of
+ *          the same fd, preserving the original maxsize.
+ *  @details If @buf is not writable, a new buffer wrapper is returned
+ *           (metadata copied, pixels not copied).
+ */
+GST_EXPORT
+gboolean gst_vvas_buffer_make_dmabuf_memory_writable (GstBuffer **buf);
 
 GST_EXPORT
 VvasInferPrediction * vvas_infer_from_gstinfer (GstInferencePrediction *pred);
@@ -204,7 +217,7 @@ vvas_format_gst_core_name_from_vvas (VvasVideoFormat fmt)
     case VVAS_VIDEO_FORMAT_RGBx_BF16:
       return "RGBX_BF16_C4";
     case VVAS_VIDEO_FORMAT_BGRx_BF16:
-      return "BGRx_BF16_C4";
+      return "BGRX_BF16_C4";
     case VVAS_VIDEO_FORMAT_RGB_BF16:
       return "RGB_BF16";
     case VVAS_VIDEO_FORMAT_BGR_BF16:
@@ -217,7 +230,7 @@ vvas_format_gst_core_name_from_vvas (VvasVideoFormat fmt)
     case VVAS_VIDEO_FORMAT_RGBx_FP16:
       return "RGBX_FP16_C4";
     case VVAS_VIDEO_FORMAT_BGRx_FP16:
-      return "BGRx_FP16_C4";
+      return "BGRX_FP16_C4";
     case VVAS_VIDEO_FORMAT_RGB_FP16:
       return "RGB_FP16";
     case VVAS_VIDEO_FORMAT_BGR_FP16:
@@ -226,6 +239,13 @@ vvas_format_gst_core_name_from_vvas (VvasVideoFormat fmt)
       return "RGB_FP16P";
     case VVAS_VIDEO_FORMAT_BGRP_FP16:
       return "BGR_FP16P";
+
+    case VVAS_VIDEO_FORMAT_RGBx_C8:
+      return "RGBX8_C8";
+    case VVAS_VIDEO_FORMAT_RGBx_BF16_C8:
+      return "RGBX_BF16_C8";
+    case VVAS_VIDEO_FORMAT_RGBx_FP16_C8:
+      return "RGBX_FP16_C8";
 
     case VVAS_VIDEO_FORMAT_RGBP_FLOAT:
       return "RGB_FLOATP";
@@ -255,7 +275,7 @@ vvas_format_from_gst_core_name (const gchar *gst_name)
     return VVAS_VIDEO_FORMAT_UNKNOWN;
   if (g_str_equal (gst_name, "RGBX_BF16_C4"))
     return VVAS_VIDEO_FORMAT_RGBx_BF16;
-  if (g_str_equal (gst_name, "BGRx_BF16_C4"))
+  if (g_str_equal (gst_name, "BGRX_BF16_C4"))
     return VVAS_VIDEO_FORMAT_BGRx_BF16;
   if (g_str_equal (gst_name, "RGB_BF16"))
     return VVAS_VIDEO_FORMAT_RGB_BF16;
@@ -268,7 +288,7 @@ vvas_format_from_gst_core_name (const gchar *gst_name)
 
   if (g_str_equal (gst_name, "RGBX_FP16_C4"))
     return VVAS_VIDEO_FORMAT_RGBx_FP16;
-  if (g_str_equal (gst_name, "BGRx_FP16_C4"))
+  if (g_str_equal (gst_name, "BGRX_FP16_C4"))
     return VVAS_VIDEO_FORMAT_BGRx_FP16;
   if (g_str_equal (gst_name, "RGB_FP16"))
     return VVAS_VIDEO_FORMAT_RGB_FP16;
@@ -278,6 +298,13 @@ vvas_format_from_gst_core_name (const gchar *gst_name)
     return VVAS_VIDEO_FORMAT_RGBP_FP16;
   if (g_str_equal (gst_name, "BGR_FP16P"))
     return VVAS_VIDEO_FORMAT_BGRP_FP16;
+
+  if (g_str_equal (gst_name, "RGBX8_C8"))
+    return VVAS_VIDEO_FORMAT_RGBx_C8;
+  if (g_str_equal (gst_name, "RGBX_BF16_C8"))
+    return VVAS_VIDEO_FORMAT_RGBx_BF16_C8;
+  if (g_str_equal (gst_name, "RGBX_FP16_C8"))
+    return VVAS_VIDEO_FORMAT_RGBx_FP16_C8;
 
   if (g_str_equal (gst_name, "RGB_FLOATP"))
     return VVAS_VIDEO_FORMAT_RGBP_FLOAT;

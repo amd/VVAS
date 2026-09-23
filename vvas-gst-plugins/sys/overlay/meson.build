@@ -18,7 +18,10 @@
 gstvvas_xoverlay = library('gstvvas_xoverlay', 'gstvvas_xoverlay.cpp',
   cpp_args : gst_plugins_vvas_args,
   include_directories : [configinc, libsinc],
-  dependencies : [gstvideo_dep, gst_dep, gstvvasalloc_dep, gstvvaspool_dep, dl_dep, gstallocators_dep, uuid_dep, gstvvasoverlaymeta_dep, vvasutils_dep,gstvvascoreutils_dep],
+  dependencies : [gstvideo_dep, gst_dep, gstvvasalloc_dep, gstvvaspool_dep,
+                  dl_dep, gstallocators_dep, uuid_dep, gstvvasoverlaymeta_dep,
+                  gstvvastilecompositioncoordinator_dep, vvasutils_dep,
+                  gstvvascoreutils_dep, gstvvaslogbridge_dep],
   install : true,
   install_dir : plugins_install_dir,
 )

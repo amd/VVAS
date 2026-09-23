@@ -24,6 +24,6 @@ Name: VVAS Gstreamer Library
 Description: VVAS Gstreamer Library Implementation
 Requires: xrt jansson vvas-utils glib-2.0 gobject-2.0 gstreamer-1.0 gstreamer-base-1.0 gstreamer-allocators-1.0 gstreamer-video-1.0 uuid
 Version: @VERSION@
-Libs: -L${libdir} -lgstvvasinfermeta-@VVAS_VERSION@ -lgstvvasinpinfermeta-@VVAS_VERSION@ -lgstvvasallocator-@VVAS_VERSION@ -lgstvvasbufferpool-@VVAS_VERSION@ -lgstvvasusrmeta-@VVAS_VERSION@ -lgstvvasoverlaymeta-@VVAS_VERSION@ -lgstvvasofmeta-@VVAS_VERSION@ -lgstvvassrcidmeta-@VVAS_VERSION@ -lgstvvascoreutils
+Libs: -L${libdir} -lgstvvasinfermeta-@VVAS_VERSION@ -lgstvvasinpinfermeta-@VVAS_VERSION@ -lgstvvasallocator-@VVAS_VERSION@ -lgstvvasbufferpool-@VVAS_VERSION@ -lgstvvastilecompositionlayout-@VVAS_VERSION@ -lgstvvastilecompositioncoordinator-@VVAS_VERSION@ -lgstvvasmasterpool-@VVAS_VERSION@ -lgstvvasslavepool-@VVAS_VERSION@ -lgstvvasusrmeta-@VVAS_VERSION@ -lgstvvasoverlaymeta-@VVAS_VERSION@ -lgstvvasofmeta-@VVAS_VERSION@ -lgstvvassrcidmeta-@VVAS_VERSION@ -lgstvvascoreutils
 Cflags: -I${includedir}
 

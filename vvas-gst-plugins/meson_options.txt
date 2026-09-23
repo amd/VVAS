@@ -25,6 +25,15 @@ option('overlay', type : 'feature', value : 'auto')
 option('multicrop', type : 'feature', value : 'auto')
 option('funnel', type : 'feature', value : 'auto')
 option('defunnel', type : 'feature', value : 'auto')
+option('xtilecompositor', type : 'feature', value : 'auto')
 
 # Common feature options
 option('examples', type : 'feature', value : 'auto', yield : true)
+
+option('build_tests', type : 'boolean', value : false,
+       description : 'Build standalone test binaries (deploy and run on target)')
+
+option('log_bridge_vart', type : 'boolean', value : true,
+       description : 'Link vart-x into gstvvaslogbridge (vvas-only bridge if false)')
+
+option('tests', type : 'feature', value : 'disabled')
